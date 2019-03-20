@@ -13,3 +13,6 @@
 
 #config
 conf.json
+
+#test app
+test.go
