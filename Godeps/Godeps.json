@@ -1,0 +1,15 @@
+{
+	"ImportPath": "gruzovbot",
+	"GoVersion": "go1.10",
+	"GodepVersion": "v80",
+	"Packages": [
+		"github.com/go-sql-driver/mysql"
+	],
+	"Deps": [
+		{
+			"ImportPath": "github.com/go-sql-driver/mysql",
+			"Comment": "v1.4.0-18-g2c9d54f",
+			"Rev": "2c9d54fefcfb443251f5b92cd5106cf4dc07b880"
+		}
+	]
+}
