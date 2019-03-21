@@ -2,33 +2,52 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	"gopkg.in/telegram-bot-api.v4"
 	"log"
 	"net/http"
+	"os"
 )
 
-type User struct{
-	chat_id int64
-	name string
-	phone string
-	status int
+type Config struct {
+	TelegramBotToken  string
+	TelegramDebugMode bool
+	DBConnectUrl      string
 }
 
 var db *sql.DB
+var configuration Config
 
-func ConnectDB()  {
-	var err error
-	db, err = sql.Open("mysql", "")
+type User struct {
+	chat_id int64
+	name    string
+	phone   string
+	status  int
+}
+
+func GetConfig() {
+	file, _ := os.Open("config.json")
+	decoder := json.NewDecoder(file)
+	configuration = Config{}
+	err := decoder.Decode(&configuration)
 	if err != nil {
 		log.Panic(err)
 	}
 }
 
-func InsertNewUser(user User)  (bool) {
+func ConnectDB() {
+	var err error
+	db, err = sql.Open("mysql", configuration.DBConnectUrl)
+	if err != nil {
+		log.Panic(err)
+	}
+}
+
+func InsertNewUser(user User) bool {
 	_, err := db.Exec("insert into users (chat_id, name, status) values (?, ?, ?)", &user)
-	if err != nil{
+	if err != nil {
 		log.Panic(err)
 		return false
 	} else {
@@ -43,17 +62,16 @@ func handler(w http.ResponseWriter, r *http.Request) {
 var roleMap map[int]string
 
 func main() {
-
-	//TODO: подключение к БД
-	ConnectDB()
+	GetConfig() // подключение конфига
+	ConnectDB() // подключение к БД
 
 	// Oбработчик запросов от telegram API
-	bot, err := tgbotapi.NewBotAPI("g")
+	bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
 
 	if err != nil {
 		log.Panic(err)
 	}
-	bot.Debug = true
+	bot.Debug = configuration.TelegramDebugMode
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
 	u := tgbotapi.NewUpdate(0)
@@ -86,7 +104,7 @@ func main() {
 
 			if rows.Next() == false {
 
-				newuser := User{chat_id:chatID, name:userName, status:0}
+				newuser := User{chat_id: chatID, name: userName, status: 0}
 				result := InsertNewUser(newuser)
 				if result == true {
 					continue
@@ -102,8 +120,8 @@ func main() {
 				case "start":
 					var StartKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 						tgbotapi.NewInlineKeyboardRow(
-							tgbotapi.NewInlineKeyboardButtonData("Заказчик","0"),
-							tgbotapi.NewInlineKeyboardButtonData("Перевозчик","1"),
+							tgbotapi.NewInlineKeyboardButtonData("Заказчик", "0"),
+							tgbotapi.NewInlineKeyboardButtonData("Перевозчик", "1"),
 						),
 					)
 
@@ -113,8 +131,8 @@ func main() {
 			sm, _ := bot.Send(msg)
 			lastID = sm.MessageID
 		} else {
-			if  lastID != 0 && update.CallbackQuery != nil {
-				bot.AnswerCallbackQuery(tgbotapi.NewCallback(update.CallbackQuery.ID,update.CallbackQuery.Data))
+			if lastID != 0 && update.CallbackQuery != nil {
+				bot.AnswerCallbackQuery(tgbotapi.NewCallback(update.CallbackQuery.ID, update.CallbackQuery.Data))
 				bot.Send(tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Укажите телефон"))
 				role := update.CallbackQuery.Data
 				/*roleMap[update.CallbackQuery.From.ID] = role*/
@@ -137,7 +155,7 @@ func main() {
 					tgbotapi.NewKeyboardButton(step1BtnText_1),
 					tgbotapi.NewKeyboardButton(step1BtnText_2),
 					tgbotapi.NewKeyboardButtonContact("Укажите телефон"),
-					)
+				)
 				keyb := tgbotapi.NewReplyKeyboard(butt)
 				msg.ReplyMarkup = &keyb
 				sm, _ := bot.Send(msg)
