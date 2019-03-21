@@ -17,4 +17,8 @@ conf.json
 #test app
 test.go
 
+#exec
+main
+
+#phpstorm
 .idea
