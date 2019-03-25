@@ -30,7 +30,6 @@ type User struct {
 func GetConfig() {
 	file, _ := os.Open("config.json")
 	decoder := json.NewDecoder(file)
-	configuration = Config{}
 	err := decoder.Decode(&configuration)
 	if err != nil {
 		log.Panic(err)
