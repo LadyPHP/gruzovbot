@@ -107,12 +107,6 @@ func main() {
 					}
 					defer rows.Close()
 
-					var StartKeyboard = tgbotapi.NewInlineKeyboardMarkup(
-						tgbotapi.NewInlineKeyboardRow(
-							tgbotapi.NewInlineKeyboardButtonData("Заказчик", "0"),
-							tgbotapi.NewInlineKeyboardButtonData("Перевозчик", "1"),
-						),
-					)
 					// если нет, то добавляем
 					if rows.Next() == false {
 						newuser := User{chat_id: chatID, name: userName, status: 0}
@@ -124,11 +118,21 @@ func main() {
 							tgbotapi.NewKeyboardButtonContact("Укажите телефон"),
 						)
 						StartKeyboard := tgbotapi.NewReplyKeyboard(butt)
-						msg.ReplyMarkup = &StartKeyboard
+						msg.ReplyMarkup = StartKeyboard
 						sm, _ := bot.Send(msg)
 						lastID = sm.MessageID
+					} else {
+						StartKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+							tgbotapi.NewInlineKeyboardRow(
+								tgbotapi.NewInlineKeyboardButtonData("Заказчик", "0"),
+								tgbotapi.NewInlineKeyboardButtonData("Перевозчик", "1"),
+							),
+						)
+						msg.ReplyMarkup = StartKeyboard
 					}
-					msg.ReplyMarkup = StartKeyboard
+
+				case "step1":
+
 				}
 
 			}
