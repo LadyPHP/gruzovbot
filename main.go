@@ -44,16 +44,6 @@ func ConnectDB() {
 	}
 }
 
-func InsertNewUser(user User) bool {
-	_, err := db.Exec("insert into users (chat_id, name, status) values (?, ?, ?)", &user)
-	if err != nil {
-		log.Panic(err)
-		return false
-	} else {
-		return true
-	}
-}
-
 func handler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "Application started.")
 }
@@ -110,10 +100,11 @@ func main() {
 					// если нет, то добавляем
 					if rows.Next() == false {
 						newuser := User{chat_id: chatID, name: userName, status: 0}
-						result := InsertNewUser(newuser)
-						if result == true {
-							continue
+						_, err := db.Exec("insert into users (chat_id, name, status) values (?, ?, ?)", &newuser)
+						if err != nil {
+							log.Panic(err)
 						}
+
 						butt := tgbotapi.NewKeyboardButtonRow(
 							tgbotapi.NewKeyboardButtonContact("Укажите телефон"),
 						)
