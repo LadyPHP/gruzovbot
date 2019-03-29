@@ -89,84 +89,55 @@ func main() {
 	// В канал updates будут приходить все новые сообщения
 	lastID := 0
 	for update := range updates {
-		if update.Message != nil {
-			chatID := update.Message.Chat.ID
-			userName := update.Message.Chat.LastName + " " + update.Message.Chat.FirstName
-			// Определим ответ по умолчанию
-			msgText := "Здравствуйте " + update.Message.Chat.FirstName + "! Я Ваш ассистент-бот Gruzov. Для начала работы выберите:"
-
-			rows, err := db.Query("select * from users where chat_id=?", chatID)
-			if err != nil {
-				log.Panic(err)
-			}
-			defer rows.Close()
-
-			if rows.Next() == false {
-
-				newuser := User{chat_id: chatID, name: userName, status: 0}
-				result := InsertNewUser(newuser)
-				if result == true {
-					continue
-				}
-			}
-
-			msg := tgbotapi.NewMessage(chatID, msgText)
-			// команды /start и /help
-			if update.Message.IsCommand() {
+		if update.Message != nil { // если поступило в ответ сообщение
+			if update.Message.IsCommand() { // если это команда
 				switch update.Message.Command() {
-				case "help":
-					msgText = "type /start"
 				case "start":
+					// Определяем входные параметры для чата
+					chatID := update.Message.Chat.ID
+					userName := update.Message.Chat.LastName + " " + update.Message.Chat.FirstName
+					msgText := "Здравствуйте " + update.Message.Chat.FirstName + "! Я Ваш ассистент-бот."
+					msg := tgbotapi.NewMessage(chatID, msgText)
+					sm, _ := bot.Send(msg)
+					lastID = sm.MessageID
+					// Определяем есть ли пользователь в базе
+					rows, err := db.Query("select * from users where chat_id=?", chatID)
+					if err != nil {
+						log.Panic(err)
+					}
+					defer rows.Close()
+
 					var StartKeyboard = tgbotapi.NewInlineKeyboardMarkup(
 						tgbotapi.NewInlineKeyboardRow(
 							tgbotapi.NewInlineKeyboardButtonData("Заказчик", "0"),
 							tgbotapi.NewInlineKeyboardButtonData("Перевозчик", "1"),
 						),
 					)
-
+					// если нет, то добавляем
+					if rows.Next() == false {
+						newuser := User{chat_id: chatID, name: userName, status: 0}
+						result := InsertNewUser(newuser)
+						if result == true {
+							continue
+						}
+						butt := tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButtonContact("Укажите телефон"),
+						)
+						StartKeyboard := tgbotapi.NewReplyKeyboard(butt)
+						msg.ReplyMarkup = &StartKeyboard
+						sm, _ := bot.Send(msg)
+						lastID = sm.MessageID
+					}
 					msg.ReplyMarkup = StartKeyboard
 				}
+
 			}
-			sm, _ := bot.Send(msg)
-			lastID = sm.MessageID
 		} else {
 			if lastID != 0 && update.CallbackQuery != nil {
-				bot.AnswerCallbackQuery(tgbotapi.NewCallback(update.CallbackQuery.ID, update.CallbackQuery.Data))
-				bot.Send(tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Укажите телефон"))
-				role := update.CallbackQuery.Data
-				/*roleMap[update.CallbackQuery.From.ID] = role*/
-				step1Msg := "Выберите желаемое действие"
-				step1BtnText_1 := "Создать новую заявку"
-				step1BtnText_2 := "Все Ваши заявки"
-				//step1BtnData_1 := "create_ticket"
-				//step1BtnData_2 := "show_tickets"
-
-				if role == "1" {
-					step1Msg = "Выберите заявку и предложите цену."
-					step1BtnText_1 = "Предложить цену"
-					step1BtnText_2 = "Ваши заявки на исполнении"
-					//step1BtnData_1 = "get_tickets"
-					//step1BtnData_2 = "get_processing"
-				}
-
-				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, step1Msg)
-				butt := tgbotapi.NewKeyboardButtonRow(
-					tgbotapi.NewKeyboardButton(step1BtnText_1),
-					tgbotapi.NewKeyboardButton(step1BtnText_2),
-					tgbotapi.NewKeyboardButtonContact("Укажите телефон"),
-				)
-				keyb := tgbotapi.NewReplyKeyboard(butt)
-				msg.ReplyMarkup = &keyb
+				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Вы что-то отправили. Я что-то отвечаю.")
 				sm, _ := bot.Send(msg)
 				lastID = sm.MessageID
 			}
 		}
-
 	}
-	// проверка есть ли пользователь в БД по UserID
-	// если есть, смотрим роль и вытаскиваем данные в зависимости от нее
-	// если новый пользователь:
-	// запоминаем UserID и телефон
-	// предлагаем выбрать роль
-	// если указал роль, дописываем ее в БД
 }
