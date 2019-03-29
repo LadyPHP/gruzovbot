@@ -99,8 +99,7 @@ func main() {
 
 					// если нет, то добавляем
 					if rows.Next() == false {
-						newuser := User{chat_id: chatID, name: userName, status: 0}
-						_, err := db.Exec("insert into users (chat_id, name, status) values (?, ?, ?)", &newuser)
+						_, err := db.Exec("insert into users (chat_id, name, status) values (?, ?, ?)", chatID, userName, 0)
 						if err != nil {
 							log.Panic(err)
 						}
