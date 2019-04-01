@@ -129,7 +129,7 @@ func main() {
 				}
 
 			}
-			msgText := update.Message.Chat.Type
+			msgText := update.Message.Contact.PhoneNumber
 			msg := tgbotapi.NewMessage(chatID, msgText)
 			sm, _ := bot.Send(msg)
 			lastID = sm.MessageID
