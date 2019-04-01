@@ -80,11 +80,11 @@ func main() {
 	lastID := 0
 	for update := range updates {
 		if update.Message != nil { // если поступило в ответ сообщение
+			chatID := update.Message.Chat.ID
 			if update.Message.IsCommand() { // если это команда
 				switch update.Message.Command() {
 				case "start":
 					// Определяем входные параметры для чата
-					chatID := update.Message.Chat.ID
 					userName := update.Message.Chat.LastName + " " + update.Message.Chat.FirstName
 					msgText := "Здравствуйте " + update.Message.Chat.FirstName + "! Я Ваш ассистент-бот."
 					msg := tgbotapi.NewMessage(chatID, msgText)
@@ -104,12 +104,16 @@ func main() {
 							log.Panic(err)
 						}
 
+						msgText = "Для начала работы отправьте ваш телефон (кнопка внизу)."
+						msg = tgbotapi.NewMessage(chatID, msgText)
 						msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 							tgbotapi.NewKeyboardButtonRow(
 								tgbotapi.NewKeyboardButtonContact("Укажите телефон"),
 							),
 						)
 					} else {
+						msgText = "Выберите:"
+						msg = tgbotapi.NewMessage(chatID, msgText)
 						msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 							tgbotapi.NewInlineKeyboardRow(
 								tgbotapi.NewInlineKeyboardButtonData("Заказчик", "0"),
@@ -125,6 +129,10 @@ func main() {
 				}
 
 			}
+			msgText := update.Message.Chat.Type
+			msg := tgbotapi.NewMessage(chatID, msgText)
+			sm, _ := bot.Send(msg)
+			lastID = sm.MessageID
 		} else {
 			if lastID != 0 && update.CallbackQuery != nil {
 				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Вы что-то отправили. Я что-то отвечаю.")
