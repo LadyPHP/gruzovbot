@@ -129,6 +129,23 @@ func main() {
 				}
 
 			}
+			phone := update.Message.Contact.PhoneNumber
+			if len(phone) > 5 {
+				_, err := db.Exec("update users set phone=? where chat_id=?", phone, chatID)
+				if err != nil {
+					log.Panic(err)
+				}
+				msgText := "Выберите:"
+				msg := tgbotapi.NewMessage(chatID, msgText)
+				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("Заказчик", "0"),
+						tgbotapi.NewInlineKeyboardButtonData("Перевозчик", "1"),
+					),
+				)
+				sm, _ := bot.Send(msg)
+				lastID = sm.MessageID
+			}
 			msgText := update.Message.Contact.PhoneNumber
 			msg := tgbotapi.NewMessage(chatID, msgText)
 			sm, _ := bot.Send(msg)
