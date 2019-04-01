@@ -104,22 +104,21 @@ func main() {
 							log.Panic(err)
 						}
 
-						butt := tgbotapi.NewKeyboardButtonRow(
-							tgbotapi.NewKeyboardButtonContact("Укажите телефон"),
+						msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+							tgbotapi.NewKeyboardButtonRow(
+								tgbotapi.NewKeyboardButtonContact("Укажите телефон"),
+							),
 						)
-						StartKeyboard := tgbotapi.NewReplyKeyboard(butt)
-						msg.ReplyMarkup = StartKeyboard
-						sm, _ := bot.Send(msg)
-						lastID = sm.MessageID
 					} else {
-						StartKeyboard := tgbotapi.NewInlineKeyboardMarkup(
+						msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 							tgbotapi.NewInlineKeyboardRow(
 								tgbotapi.NewInlineKeyboardButtonData("Заказчик", "0"),
 								tgbotapi.NewInlineKeyboardButtonData("Перевозчик", "1"),
 							),
 						)
-						msg.ReplyMarkup = StartKeyboard
 					}
+					sm, _ = bot.Send(msg)
+					lastID = sm.MessageID
 
 				case "step1":
 
