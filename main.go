@@ -130,11 +130,11 @@ func main() {
 				}
 
 			}
-			answerPhone := update.Message.Contact.PhoneNumber
+
 			msgText := "TEST"
 
-			if answerPhone != "" {
-				Phone, err := strconv.ParseInt(answerPhone, 64, 64)
+			if update.Message.Contact.PhoneNumber != "" {
+				Phone, err := strconv.ParseUint(update.Message.Contact.PhoneNumber, 10, 64)
 				if err != nil {
 					_, err := db.Exec("update users set phone=? where chat_id=?", Phone, chatID)
 					if err != nil {
