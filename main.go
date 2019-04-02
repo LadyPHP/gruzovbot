@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 )
 
 type Config struct {
@@ -129,9 +130,9 @@ func main() {
 				}
 
 			}
-			Phone := update.Message.Contact.PhoneNumber
+			Phone, _ := strconv.ParseInt(update.Message.Contact.PhoneNumber, 11, 64)
 			msgText := "TEST"
-			if len(Phone) > 0 {
+			if Phone > 0 {
 				_, err := db.Exec("update users set phone=? where chat_id=?", Phone, chatID)
 				if err != nil {
 					log.Panic(err)
