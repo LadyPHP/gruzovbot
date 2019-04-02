@@ -133,9 +133,9 @@ func main() {
 
 			msgText := "TEST"
 
-			if update.Message.Contact.PhoneNumber != "" {
-				Phone, err := strconv.ParseUint(update.Message.Contact.PhoneNumber, 10, 64)
-				if err != nil {
+			if update.Message.Contact != nil {
+				Phone, err := strconv.ParseUint(update.Message.Contact.PhoneNumber, 0, 64)
+				if err == nil {
 					_, err := db.Exec("update users set phone=? where chat_id=?", Phone, chatID)
 					if err != nil {
 						log.Panic(err)
