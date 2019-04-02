@@ -67,8 +67,8 @@ func main() {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
-	//updates, err := bot.GetUpdatesChan(u)
-	updates := bot.ListenForWebhook("/" + bot.Token)
+	updates, err := bot.GetUpdatesChan(u)
+	//updates := bot.ListenForWebhook("/" + bot.Token)
 
 	if err != nil {
 		log.Panic(err)
@@ -130,9 +130,9 @@ func main() {
 				}
 
 			}
-			Phone, _ := strconv.ParseInt(update.Message.Contact.PhoneNumber, 11, 64)
+			Phone, err := strconv.ParseInt(update.Message.Contact.PhoneNumber, 10, 64)
 			msgText := "TEST"
-			if Phone > 0 {
+			if err != nil {
 				_, err := db.Exec("update users set phone=? where chat_id=?", Phone, chatID)
 				if err != nil {
 					log.Panic(err)
