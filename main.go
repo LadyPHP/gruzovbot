@@ -99,7 +99,7 @@ func main() {
 				}
 			} else { // иначе вычисляем на каком он шаге
 				var user User
-				err = rows.Scan(&user.chat_id, &user.name, &user.phone, &user.status)
+				err = rows.Scan(&user.chat_id, &user.name, &user.status)
 				if err != nil {
 					log.Panic(err)
 				}
