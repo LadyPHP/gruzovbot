@@ -99,7 +99,7 @@ func main() {
 				}
 			} else { // иначе вычисляем на каком он шаге
 				var user User
-				err = rows.Scan(&user.chat_id, &user.name, &user.status)
+				err = rows.Scan(&user.chat_id, &user.name, &user.phone, &user.status)
 				if err != nil {
 					log.Panic(err)
 				}
@@ -113,16 +113,11 @@ func main() {
 				}
 			}
 
-			msgText := ""
+			msgText := "Здравствуйте " + update.Message.Chat.FirstName + "! Я Ваш ассистент-бот."
 			msg := tgbotapi.NewMessage(chatID, msgText)
 
 			switch step {
 			case 0:
-				msgText = "Здравствуйте " + update.Message.Chat.FirstName + "! Я Ваш ассистент-бот."
-				msg = tgbotapi.NewMessage(chatID, msgText)
-				sm, _ := bot.Send(msg)
-				lastID = sm.MessageID
-
 				msgText = "Для начала работы отправьте ваш телефон (кнопка внизу)."
 				msg = tgbotapi.NewMessage(chatID, msgText)
 				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
@@ -162,7 +157,35 @@ func main() {
 
 		} else {
 			if lastID != 0 && update.CallbackQuery != nil {
-				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Вы что-то отправили. Я что-то отвечаю.")
+				step := 2
+				chatID := update.CallbackQuery.Message.Chat.ID
+				// Определяем есть ли пользователь в базе и на каком он шаге
+				rows, err := db.Query("select * from users where chat_id=?", chatID)
+				if err != nil {
+					log.Panic(err)
+				}
+				defer rows.Close()
+
+				msgText := ""
+				msg := tgbotapi.NewMessage(chatID, msgText)
+
+				switch step {
+				case 2:
+					msgText = "Для продолжения работы с заявками выберите в меню:"
+					msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+						tgbotapi.NewKeyboardButtonRow(
+							tgbotapi.NewKeyboardButton("Создать новую"),
+							tgbotapi.NewKeyboardButton("История заявок"),
+						),
+					)
+					_, err := db.Exec("update users set status=3 where chat_id=?", chatID)
+					if err != nil {
+						log.Panic(err)
+					}
+				case 3:
+					msgText = update.Message.ReplyToMessage.Text
+					msg = tgbotapi.NewMessage(chatID, msgText)
+				}
 				sm, _ := bot.Send(msg)
 				lastID = sm.MessageID
 			}
