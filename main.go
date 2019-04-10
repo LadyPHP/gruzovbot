@@ -106,11 +106,23 @@ func main() {
 				step = user.status
 			}
 
+			if update.Message.IsCommand() { // если это команда
+				switch update.Message.Command() {
+				case "start":
+					step = 0
+				}
+			}
+
 			msgText := ""
 			msg := tgbotapi.NewMessage(chatID, msgText)
 
 			switch step {
 			case 0:
+				msgText = "Здравствуйте " + update.Message.Chat.FirstName + "! Я Ваш ассистент-бот."
+				msg = tgbotapi.NewMessage(chatID, msgText)
+				sm, _ := bot.Send(msg)
+				lastID = sm.MessageID
+
 				msgText = "Для начала работы отправьте ваш телефон (кнопка внизу)."
 				msg = tgbotapi.NewMessage(chatID, msgText)
 				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
@@ -147,24 +159,6 @@ func main() {
 
 			sm, _ := bot.Send(msg)
 			lastID = sm.MessageID
-
-			if update.Message.IsCommand() { // если это команда
-				switch update.Message.Command() {
-				case "start":
-					msgText := "Здравствуйте " + update.Message.Chat.FirstName + "! Я Ваш ассистент-бот."
-					msg := tgbotapi.NewMessage(chatID, msgText)
-					sm, _ := bot.Send(msg)
-					lastID = sm.MessageID
-					// Определяем есть ли пользователь в базе
-					// если нет, то добавляем
-					if rows.Next() == false {
-						_, err := db.Exec("insert into users (chat_id, name, status) values (?, ?, ?)", chatID, userName, 0)
-						if err != nil {
-							log.Panic(err)
-						}
-					}
-				}
-			}
 
 		} else {
 			if lastID != 0 && update.CallbackQuery != nil {
