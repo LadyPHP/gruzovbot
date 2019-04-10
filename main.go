@@ -82,72 +82,90 @@ func main() {
 	for update := range updates {
 		if update.Message != nil { // если поступило в ответ сообщение
 			chatID := update.Message.Chat.ID
+			userName := update.Message.Chat.LastName + " " + update.Message.Chat.FirstName
+			// Определяем есть ли пользователь в базе и на каком он шаге
+			rows, err := db.Query("select * from users where chat_id=?", chatID)
+			if err != nil {
+				log.Panic(err)
+			}
+			defer rows.Close()
+
+			// если нет, то добавляем
+			step := 0
+			if rows.Next() == false {
+				_, err := db.Exec("insert into users (chat_id, name, status) values (?, ?, ?)", chatID, userName, 0)
+				if err != nil {
+					log.Panic(err)
+				}
+			} else { // иначе вычисляем на каком он шаге
+				var user User
+				err = rows.Scan(&user.chat_id, &user.status)
+				if err != nil {
+					log.Panic(err)
+				}
+				step = user.status
+			}
+
+			msgText := ""
+			msg := tgbotapi.NewMessage(chatID, msgText)
+
+			switch step {
+			case 0:
+				msgText = "Для начала работы отправьте ваш телефон (кнопка внизу)."
+				msg = tgbotapi.NewMessage(chatID, msgText)
+				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
+					tgbotapi.NewKeyboardButtonRow(
+						tgbotapi.NewKeyboardButtonContact("Отправить телефон"),
+					),
+				)
+				_, err := db.Exec("update users set status=1 where chat_id=?", chatID)
+				if err != nil {
+					log.Panic(err)
+				}
+			case 1:
+				if update.Message.Contact != nil {
+					Phone, err := strconv.ParseUint(update.Message.Contact.PhoneNumber, 0, 64)
+					if err == nil {
+						_, err := db.Exec("update users set phone=?, status=2 where chat_id=?", Phone, chatID)
+						if err != nil {
+							log.Panic(err)
+						}
+
+						msgText = update.Message.Contact.PhoneNumber
+					}
+				}
+
+				msgText = "Выберите:"
+				msg = tgbotapi.NewMessage(chatID, msgText)
+				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("Заказчик", "0"),
+						tgbotapi.NewInlineKeyboardButtonData("Перевозчик", "1"),
+					),
+				)
+			}
+
+			sm, _ := bot.Send(msg)
+			lastID = sm.MessageID
+
 			if update.Message.IsCommand() { // если это команда
 				switch update.Message.Command() {
 				case "start":
-					// Определяем входные параметры для чата
-					userName := update.Message.Chat.LastName + " " + update.Message.Chat.FirstName
 					msgText := "Здравствуйте " + update.Message.Chat.FirstName + "! Я Ваш ассистент-бот."
 					msg := tgbotapi.NewMessage(chatID, msgText)
 					sm, _ := bot.Send(msg)
 					lastID = sm.MessageID
 					// Определяем есть ли пользователь в базе
-					rows, err := db.Query("select * from users where chat_id=?", chatID)
-					if err != nil {
-						log.Panic(err)
-					}
-					defer rows.Close()
-
 					// если нет, то добавляем
 					if rows.Next() == false {
 						_, err := db.Exec("insert into users (chat_id, name, status) values (?, ?, ?)", chatID, userName, 0)
 						if err != nil {
 							log.Panic(err)
 						}
-
-						msgText = "Для начала работы отправьте ваш телефон (кнопка внизу)."
-						msg = tgbotapi.NewMessage(chatID, msgText)
-						msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
-							tgbotapi.NewKeyboardButtonRow(
-								tgbotapi.NewKeyboardButtonContact("Отправить телефон"),
-							),
-						)
-					} else {
-						msgText = "Выберите:"
-						msg = tgbotapi.NewMessage(chatID, msgText)
-						msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
-							tgbotapi.NewInlineKeyboardRow(
-								tgbotapi.NewInlineKeyboardButtonData("Заказчик", "0"),
-								tgbotapi.NewInlineKeyboardButtonData("Перевозчик", "1"),
-							),
-						)
 					}
-					sm, _ = bot.Send(msg)
-					lastID = sm.MessageID
-
-				case "step1":
-
-				}
-
-			}
-
-			msgText := "TEST"
-
-			if update.Message.Contact != nil {
-				Phone, err := strconv.ParseUint(update.Message.Contact.PhoneNumber, 0, 64)
-				if err == nil {
-					_, err := db.Exec("update users set phone=? where chat_id=?", Phone, chatID)
-					if err != nil {
-						log.Panic(err)
-					}
-
-					msgText = update.Message.Contact.PhoneNumber
 				}
 			}
 
-			msg := tgbotapi.NewMessage(chatID, msgText)
-			sm, _ := bot.Send(msg)
-			lastID = sm.MessageID
 		} else {
 			if lastID != 0 && update.CallbackQuery != nil {
 				msg := tgbotapi.NewMessage(update.CallbackQuery.Message.Chat.ID, "Вы что-то отправили. Я что-то отвечаю.")
