@@ -15,6 +15,7 @@ import (
 type Config struct {
 	TelegramBotToken  string
 	TelegramDebugMode bool
+	TelegramAPIMode   string
 	DBConnectUrl      string
 }
 
@@ -91,6 +92,25 @@ func UpdateTicket(chatID int64, step int, field string, value string) bool {
 	return true
 }
 
+func GetTickets(chatID int64) Ticket {
+	tickets, err := db.Query("select ticket_id, date, address, comments, car_type, shipment_type, weight, volume, length from tickets where customer_id=?", chatID)
+	if err != nil {
+		log.Panic(err)
+	}
+	defer tickets.Close()
+
+	if tickets.Next() == false {
+		log.Panic(err)
+	}
+	// если есть ранее созданные заказчиком заказы, выводим сообщением со ссылками
+	var ticket Ticket
+	err = tickets.Scan(&ticket.ticket_id, &ticket.date, &ticket.address, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length)
+	if err != nil {
+		log.Panic(err)
+	}
+	return ticket
+}
+
 func main() {
 	GetConfig() // подключение конфига
 	ConnectDB() // подключение к БД
@@ -107,8 +127,11 @@ func main() {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 
-	//updates, err := bot.GetUpdatesChan(u)
+	// тип взаимодействия с API (переключается в config.json: "TelegramAPIMode" : "channel" или "webhook")
 	updates := bot.ListenForWebhook("/" + bot.Token)
+	if configuration.TelegramAPIMode == "channel" {
+		updates, err = bot.GetUpdatesChan(u)
+	}
 
 	if err != nil {
 		log.Panic(err)
@@ -213,25 +236,49 @@ func main() {
 								log.Panic(err)
 							}
 						case "История заявок":
-							tickets, err := db.Query("select * from tickets where customer_id=?", chatID)
+							tickets, err := db.Query("select ticket_id, date, address, comments, car_type, shipment_type, weight, volume, length from tickets where customer_id=?", chatID)
 							if err != nil {
 								log.Panic(err)
 							}
 							defer tickets.Close()
 
-							if tickets.Next() != false {
+							ticketsRows := make([]*Ticket, 0)
+
+							for tickets.Next() {
 								// если есть ранее созданные заказчиком заказы, выводим сообщением со ссылками
-								var ticket Ticket
-								err = tickets.Scan(&ticket.ticket_id, &ticket.status, &ticket.address, &ticket.date, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length, &ticket.options, &ticket.customer_id)
+								ticket := new(Ticket)
+								err = tickets.Scan(&ticket.ticket_id, &ticket.date, &ticket.address, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length)
 								if err != nil {
 									log.Panic(err)
 								}
-								msgText = msgText + fmt.Sprintf("№ %s, статус: %s, дата и время: %s, адрес: %s, комментарий: %s, тип автомобиля: %s, тип погрузки: %s, вес (кг): %s, объем (м3): %s, макс. длина (м): %s", ticket.ticket_id, ticket.status, ticket.date, ticket.address, ticket.comments, ticket.car_type, ticket.shipment_type, ticket.weight, ticket.volume, ticket.length)
+								ticketsRows = append(ticketsRows, ticket)
+							}
+
+							if ticketsRows != nil {
+
+								for _, ticket := range ticketsRows {
+									msgText = fmt.Sprintln("№ + ", ticket.ticket_id,
+										", Дата и время: ", ticket.date, ", Адрес: ", ticket.address,
+										", Комментарий: ", ticket.comments, ", Тип автомобиля: ", ticket.car_type,
+										", Тип погрузчика: ", ticket.shipment_type, ", Вес (кг): ", ticket.weight,
+										", Объем (м3): ", ticket.volume, ", Макс.длина (м): ", ticket.length)
+
+									msg = tgbotapi.NewMessage(chatID, msgText)
+									msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+										tgbotapi.NewInlineKeyboardRow(
+											tgbotapi.NewInlineKeyboardButtonData("Копировать", "1"),
+											tgbotapi.NewInlineKeyboardButtonData("Отменить", "0"),
+										),
+									)
+									sm, _ := bot.Send(msg)
+									lastID = sm.MessageID
+								}
+
 							} else {
 								// иначе показываем просто сообщение
 								msgText = "Вы пока не создали ниодной заявки. Чтобы начать, нажмите кнопку \"Создать новую\""
+								msg = tgbotapi.NewMessage(chatID, msgText)
 							}
-							msg = tgbotapi.NewMessage(chatID, msgText)
 						}
 					case 4:
 						result := UpdateTicket(chatID, step, "date", update.Message.Text)
@@ -281,31 +328,19 @@ func main() {
 						result := UpdateTicket(chatID, step, "comments", update.Message.Text)
 						if result == true {
 							msgText = "Проверьте информацию и подтвердите публикацию заявки."
-							tickets, err := db.Query("select ticket_id, date, address, comments, car_type, shipment_type, weight, volume, length from tickets where customer_id=?", chatID)
+							ticket := GetTickets(chatID)
+							// обновляем шаг пользователя
+							_, err = db.Exec("update users set status=? where chat_id=?", step+1, chatID)
 							if err != nil {
 								log.Panic(err)
 							}
-							defer tickets.Close()
+							// дополняем сообщение информацией о заявке
+							msgText = msgText + fmt.Sprintln("№ + ", ticket.ticket_id,
+								", Дата и время: ", ticket.date, ", Адрес: ", ticket.address,
+								", Комментарий: ", ticket.comments, ", Тип автомобиля: ", ticket.car_type,
+								", Тип погрузчика: ", ticket.shipment_type, ", Вес (кг): ", ticket.weight,
+								", Объем (м3): ", ticket.volume, ", Макс.длина (м): ", ticket.length)
 
-							if tickets.Next() != false {
-								// если есть ранее созданные заказчиком заказы, выводим сообщением со ссылками
-								var ticket Ticket
-								err = tickets.Scan(&ticket.ticket_id, &ticket.date, &ticket.address, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length)
-								if err != nil {
-									log.Panic(err)
-								}
-								// обновляем шаг пользователя
-								_, err = db.Exec("update users set status=? where chat_id=?", step+1, chatID)
-								if err != nil {
-									log.Panic(err)
-								}
-								// дополняем сообщение информацией о заявке
-								msgText = msgText + fmt.Sprintln("№ + ", ticket.ticket_id,
-									", Дата и время: ", ticket.date, ", Адрес: ", ticket.address,
-									", Комментарий: ", ticket.comments, ", Тип автомобиля: ", ticket.car_type,
-									", Тип погрузчика: ", ticket.shipment_type, ", Вес (кг): ", ticket.weight,
-									", Объем (м3): ", ticket.volume, ", Макс.длина (м): ", ticket.length)
-							}
 							// отпраляем сообщение
 							msg = tgbotapi.NewMessage(chatID, msgText)
 							// отправляем кнопки
@@ -315,6 +350,67 @@ func main() {
 									tgbotapi.NewInlineKeyboardButtonData("Отменить", "0"),
 								),
 							)
+						}
+					default:
+						switch update.Message.Text {
+						case "Создать новую":
+							msgText = "Время и дата погрузки"
+							msg = tgbotapi.NewMessage(chatID, msgText)
+
+							// создаем запись в БД о новой заявке
+							_, err := db.Exec("insert into tickets (customer_id, status) values (?, 0)", chatID)
+							if err != nil {
+								log.Panic(err)
+							}
+							// обновляем шаг для пользователя
+							_, err = db.Exec("update users set status=4 where chat_id=?", chatID)
+							if err != nil {
+								log.Panic(err)
+							}
+						case "История заявок":
+							tickets, err := db.Query("select ticket_id, date, address, comments, car_type, shipment_type, weight, volume, length from tickets where customer_id=?", chatID)
+							if err != nil {
+								log.Panic(err)
+							}
+							defer tickets.Close()
+
+							ticketsRows := make([]*Ticket, 0)
+
+							for tickets.Next() {
+								// если есть ранее созданные заказчиком заказы, выводим сообщением со ссылками
+								ticket := new(Ticket)
+								err = tickets.Scan(&ticket.ticket_id, &ticket.date, &ticket.address, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length)
+								if err != nil {
+									log.Panic(err)
+								}
+								ticketsRows = append(ticketsRows, ticket)
+							}
+
+							if ticketsRows != nil {
+
+								for _, ticket := range ticketsRows {
+									msgText = fmt.Sprintln("№ + ", ticket.ticket_id,
+										", Дата и время: ", ticket.date, ", Адрес: ", ticket.address,
+										", Комментарий: ", ticket.comments, ", Тип автомобиля: ", ticket.car_type,
+										", Тип погрузчика: ", ticket.shipment_type, ", Вес (кг): ", ticket.weight,
+										", Объем (м3): ", ticket.volume, ", Макс.длина (м): ", ticket.length)
+
+									msg = tgbotapi.NewMessage(chatID, msgText)
+									msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+										tgbotapi.NewInlineKeyboardRow(
+											tgbotapi.NewInlineKeyboardButtonData("Копировать", "1"),
+											tgbotapi.NewInlineKeyboardButtonData("Отменить", "0"),
+										),
+									)
+									sm, _ := bot.Send(msg)
+									lastID = sm.MessageID
+								}
+
+							} else {
+								// иначе показываем просто сообщение
+								msgText = "Вы пока не создали ниодной заявки. Чтобы начать, нажмите кнопку \"Создать новую\""
+								msg = tgbotapi.NewMessage(chatID, msgText)
+							}
 						}
 					}
 				} else {
