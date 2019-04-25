@@ -112,7 +112,7 @@ func GetTickets(chatID int64) Ticket {
 	return ticket
 }
 
-func MainMenu(role int) (msg tgbotapi.ReplyKeyboardMarkup) {
+func MainMenu(chatID int64, role int64) (msg tgbotapi.ReplyKeyboardMarkup) {
 	btnText1 := "Создать новую"
 	btnText2 := "История заявок"
 
@@ -120,6 +120,13 @@ func MainMenu(role int) (msg tgbotapi.ReplyKeyboardMarkup) {
 		btnText1 = "Все новые заявки"
 		btnText2 = "Исполняемые мной"
 	}
+
+	_, err := db.Exec("update users set status=1000 where chat_id=?", chatID)
+	if err != nil {
+		log.Panic(err)
+	}
+	fmt.Println(chatID)
+
 	return tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
 			tgbotapi.NewKeyboardButton(btnText1),
@@ -134,7 +141,7 @@ func CustomerBranch(chatID int64, step int, inMessage string, InsertTicket int64
 	msgText := ""
 	msg := tgbotapi.NewMessage(chatID, msgText)
 	sendFlag := true // по умолчанию разрешаем отправку сообщений на каждом шаге
-	MainMenu(0)
+
 	switch step {
 	case 4:
 		result := UpdateTicket(chatID, step, "date", inMessage)
@@ -243,7 +250,7 @@ func CustomerBranch(chatID int64, step int, inMessage string, InsertTicket int64
 				ticketsRows = append(ticketsRows, ticket)
 			}
 
-			if ticketsRows != nil {
+			if len(ticketsRows) > 0 {
 				sendFlag = false
 
 				for _, ticket := range ticketsRows {
@@ -253,11 +260,17 @@ func CustomerBranch(chatID int64, step int, inMessage string, InsertTicket int64
 						btnText = "Опубликовать"
 						btnData = "1"
 					}
-					msgText = fmt.Sprintln("№ + ", ticket.ticket_id,
-						", Дата и время: ", ticket.date, ", Адрес: ", ticket.address,
-						", Комментарий: ", ticket.comments, ", Тип автомобиля: ", ticket.car_type,
-						", Тип погрузчика: ", ticket.shipment_type, ", Вес (кг): ", ticket.weight,
-						", Объем (м3): ", ticket.volume, ", Макс.длина (м): ", ticket.length)
+					msgText = fmt.Sprintln(
+						"№ + ", ticket.ticket_id,
+						", \n Дата и время: ", ticket.date,
+						", \n Адрес: ", ticket.address,
+						", \n Комментарий: ", ticket.comments,
+						", \n Тип автомобиля: ", ticket.car_type,
+						", \n Тип погрузчика: ", ticket.shipment_type,
+						", \n Вес (кг): ", ticket.weight,
+						", \n Объем (м3): ", ticket.volume,
+						", \n Макс.длина (м): ", ticket.length,
+					)
 
 					msg = tgbotapi.NewMessage(chatID, msgText)
 					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
@@ -268,15 +281,26 @@ func CustomerBranch(chatID int64, step int, inMessage string, InsertTicket int64
 					)
 					bot.Send(msg)
 				}
-
 			} else {
-				// иначе показываем просто сообщение
-				msgText = "Вы пока не создали ниодной заявки. Чтобы начать, нажмите кнопку \"Создать новую\""
+				msgText = "Вы пока не создали ниодной заявки. \n Чтобы начать, нажмите кнопку \"Создать новую\""
 				msg = tgbotapi.NewMessage(chatID, msgText)
+			}
+		case "Изменить роль":
+			msgText = "Выберите:"
+			msg = tgbotapi.NewMessage(chatID, msgText)
+			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("Заказчик", "0"),
+					tgbotapi.NewInlineKeyboardButtonData("Перевозчик", "1"),
+				),
+			)
+			_, err = db.Exec("update users set status=2 where chat_id=?", chatID)
+			if err != nil {
+				log.Panic(err)
 			}
 		}
 	}
-	if sendFlag != false {
+	if sendFlag == true {
 		bot.Send(msg)
 	}
 }
@@ -354,13 +378,12 @@ func main() {
 
 			msgText := ""
 			msg := tgbotapi.NewMessage(chatID, msgText)
-			MainMenu(role)
 
 			// Обработчик по полученным состояниям (шагам)
 			switch step {
 			// приветсвие и запрос телефона
 			case 0:
-				msgText = "Здравствуйте " + update.Message.Chat.FirstName + "! Я Ваш ассистент-бот. Для начала работы отправьте ваш телефон (кнопка внизу)."
+				msgText = "Здравствуйте " + update.Message.Chat.FirstName + "! \n Я Ваш ассистент-бот. Для начала работы отправьте ваш телефон (кнопка внизу)."
 				msg = tgbotapi.NewMessage(chatID, msgText)
 				msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
 					tgbotapi.NewKeyboardButtonRow(
@@ -395,6 +418,8 @@ func main() {
 				)
 			// обработка дальнейших шагов по ролям
 			default:
+				msg.ReplyMarkup = MainMenu(chatID, 0)
+
 				if role == 0 {
 					// Оформление заявки заказчиком
 					CustomerBranch(chatID, step, update.Message.Text, InsertTicket)
@@ -413,7 +438,7 @@ func main() {
 		} else {
 			if update.CallbackQuery != nil {
 				step := 2
-				role := uint64(0)
+				role := int64(0)
 				chatID := update.CallbackQuery.Message.Chat.ID
 				// Определяем есть ли пользователь в базе и на каком он шаге
 				users, err := db.Query("select * from users where chat_id=?", chatID)
@@ -429,7 +454,7 @@ func main() {
 						log.Panic(err)
 					}
 					step = user.status
-					role = uint64(user.role)
+					role = int64(user.role)
 				}
 
 				msgText := ""
@@ -439,47 +464,32 @@ func main() {
 				switch step {
 				case 2:
 					// запоминаем выбранную роль
-					role, err = strconv.ParseUint(update.CallbackQuery.Data, 0, 64)
+					role, err = strconv.ParseInt(update.CallbackQuery.Data, 0, 64)
 					if err != nil {
 						// не отлавливаем ошибку, а просто ставим роль = 0
 						role = 0
 					}
 
+					msgText = "Отлично, при необходимости изменить роль, просто воспользуйтесь соответствующим пунктом меню.\n\n"
+					msgText = msgText + "Для продолжения работы с заявками выберите в меню одно из действий."
+					msg = tgbotapi.NewMessage(chatID, msgText)
+					msg.ReplyMarkup = MainMenu(chatID, role)
+
 					_, err = db.Exec("update users set status=3, role=? where chat_id=?", role, chatID)
 					if err != nil {
 						log.Panic(err)
 					}
-
-					msgText = "Отлично, при необходимости изменить роль, просто воспользуйтесь соответствующим пунктом меню."
-					msgText = msgText + "Для продолжения работы с заявками выберите в меню:"
-					msg = tgbotapi.NewMessage(chatID, msgText)
-					if role == 0 {
-						msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
-							tgbotapi.NewKeyboardButtonRow(
-								tgbotapi.NewKeyboardButton("Создать новую"),
-								tgbotapi.NewKeyboardButton("История заявок"),
-							),
-						)
-					} else {
-						msg.ReplyMarkup = tgbotapi.NewReplyKeyboard(
-							tgbotapi.NewKeyboardButtonRow(
-								tgbotapi.NewKeyboardButton("Все новые заявки"),
-								tgbotapi.NewKeyboardButton("Мои заявки в работе"),
-							),
-						)
-					}
 				case 12:
-					fmt.Println(update.CallbackQuery.Data)
+
 					if role == 0 {
 						published, err := strconv.ParseInt(update.CallbackQuery.Data, 0, 64)
-						if err != nil {
+						if err == nil {
 							if published == 1 {
-								fmt.Println("published")
 								_, err := db.Exec("update tickets set status=1 where customer_id=? and status=0", chatID)
 								if err != nil {
 									log.Panic(err)
 								}
-								_, err = db.Exec("update users set status=13 where chat_id=?", role, chatID)
+								_, err = db.Exec("update users set status=13 where chat_id=?", chatID)
 								if err != nil {
 									log.Panic(err)
 								}
@@ -492,6 +502,7 @@ func main() {
 					}
 					msg = tgbotapi.NewMessage(chatID, msgText)
 				}
+
 				bot.Send(msg)
 			}
 		}
