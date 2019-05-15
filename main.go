@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 )
 
 var db *sql.DB
@@ -125,7 +126,7 @@ func MainMenu(chatID int64, role int64) (msg tgbotapi.ReplyKeyboardMarkup) {
 	if err != nil {
 		log.Panic(err)
 	}
-	fmt.Println(chatID)
+	//fmt.Println(chatID)
 
 	return tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
@@ -210,6 +211,7 @@ func CustomerBranch(chatID int64, step int, inMessage string, InsertTicket int64
 			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 				tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData("Опубликовать", "1"),
+					tgbotapi.NewInlineKeyboardButtonData("Редактировать", "2"),
 					tgbotapi.NewInlineKeyboardButtonData("Отменить", "0"),
 				),
 			)
@@ -281,8 +283,13 @@ func CustomerBranch(chatID int64, step int, inMessage string, InsertTicket int64
 					)
 					bot.Send(msg)
 				}
+				// обновляем шаг для пользователя
+				_, err := db.Exec("update users set status=12 where chat_id=?", chatID)
+				if err != nil {
+					log.Panic(err)
+				}
 			} else {
-				msgText = "Вы пока не создали ниодной заявки. \n Чтобы начать, нажмите кнопку \"Создать новую\""
+				msgText = "Вы пока не создали ниодной заявки. \n Чтобы начать, нажмите кнопку \"Создать новую\" в меню."
 				msg = tgbotapi.NewMessage(chatID, msgText)
 			}
 		case "Изменить роль":
@@ -459,7 +466,7 @@ func main() {
 
 				msgText := ""
 				msg := tgbotapi.NewMessage(chatID, msgText)
-				fmt.Println(msgText)
+				//fmt.Println(msgText)
 
 				switch step {
 				case 2:
@@ -480,12 +487,14 @@ func main() {
 						log.Panic(err)
 					}
 				case 12:
+					ticketMsgArr := strings.Fields(update.CallbackQuery.Message.Text)
+					ticketID, errTicketNum := strconv.ParseInt(ticketMsgArr[2], 0, 64)
 
 					if role == 0 {
 						published, err := strconv.ParseInt(update.CallbackQuery.Data, 0, 64)
-						if err == nil {
+						if err == nil && errTicketNum == nil {
 							if published == 1 {
-								_, err := db.Exec("update tickets set status=1 where customer_id=? and status=0", chatID)
+								_, err := db.Exec("update tickets set status=1 where customer_id=? and ticket_id=? and status=0", chatID, ticketID)
 								if err != nil {
 									log.Panic(err)
 								}
