@@ -74,13 +74,13 @@ func UpdateTicket(chatID int64, step int, field string, value string) bool {
 		if err != nil {
 			log.Panic(err)
 		}
-		_, err = db.Exec("update tickets set "+field+"=? where customer_id=? and status=0", updValue, chatID)
+		_, err = db.Exec("update tickets set "+field+"=? where customer_id=? and status=1", updValue, chatID)
 		if err != nil {
 			log.Panic(err)
 		}
 	} else {
 		updValue := value
-		_, err := db.Exec("update tickets set "+field+"=? where customer_id=? and status=0", updValue, chatID)
+		_, err := db.Exec("update tickets set "+field+"=? where customer_id=? and status=1", updValue, chatID)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -137,7 +137,7 @@ func MainMenu(chatID int64, role int64) (msg tgbotapi.ReplyKeyboardMarkup) {
 	)
 }
 
-func CustomerBranch(chatID int64, step int, inMessage string, InsertTicket int64) {
+func CustomerBranch(chatID int64, step int, inMessage string) {
 	bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
 	msgText := ""
 	msg := tgbotapi.NewMessage(chatID, msgText)
@@ -223,7 +223,7 @@ func CustomerBranch(chatID int64, step int, inMessage string, InsertTicket int64
 			msg = tgbotapi.NewMessage(chatID, msgText)
 
 			// создаем запись в БД о новой заявке
-			result, err := db.Exec("insert into tickets (customer_id, status) values (?, 0)", chatID)
+			result, err := db.Exec("insert into tickets (customer_id, status) values (?, 1)", chatID)
 			InsertTicket, err = result.LastInsertId()
 			if err != nil {
 				log.Panic(err)
@@ -256,11 +256,15 @@ func CustomerBranch(chatID int64, step int, inMessage string, InsertTicket int64
 				sendFlag = false
 
 				for _, ticket := range ticketsRows {
-					btnText := "Отменить"
-					btnData := "0"
-					if ticket.status == 0 {
-						btnText = "Опубликовать"
-						btnData = "1"
+					btnText1 := "Отменить"
+					btnData1 := fmt.Sprintf("0 %d", ticket.ticket_id)
+					btnText2 := "Копировать"
+					btnData2 := fmt.Sprintf("1 %d", ticket.ticket_id)
+					if ticket.status <= 1 {
+						btnText1 = "Опубликовать"
+						btnData1 = fmt.Sprintf("2 %d", ticket.ticket_id)
+						btnText2 = "Изменить"
+						btnData2 = fmt.Sprintf("3 %d", ticket.ticket_id)
 					}
 					msgText = fmt.Sprintln(
 						"№ + ", ticket.ticket_id,
@@ -277,8 +281,8 @@ func CustomerBranch(chatID int64, step int, inMessage string, InsertTicket int64
 					msg = tgbotapi.NewMessage(chatID, msgText)
 					msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 						tgbotapi.NewInlineKeyboardRow(
-							tgbotapi.NewInlineKeyboardButtonData("Копировать", "2"),
-							tgbotapi.NewInlineKeyboardButtonData(btnText, btnData),
+							tgbotapi.NewInlineKeyboardButtonData(btnText1, btnData1),
+							tgbotapi.NewInlineKeyboardButtonData(btnText2, btnData2),
 						),
 					)
 					bot.Send(msg)
@@ -429,7 +433,7 @@ func main() {
 
 				if role == 0 {
 					// Оформление заявки заказчиком
-					CustomerBranch(chatID, step, update.Message.Text, InsertTicket)
+					CustomerBranch(chatID, step, update.Message.Text)
 				} else {
 					// Обработка заявки исполнителем
 					switch step {
@@ -487,29 +491,80 @@ func main() {
 						log.Panic(err)
 					}
 				case 12:
-					ticketMsgArr := strings.Fields(update.CallbackQuery.Message.Text)
-					ticketID, errTicketNum := strconv.ParseInt(ticketMsgArr[2], 0, 64)
+					ticketMsgArr := strings.Fields(update.CallbackQuery.Data)
+					ticketID, errTicketNum := strconv.ParseInt(ticketMsgArr[1], 0, 64)
+					ticketMenu := tgbotapi.NewInlineKeyboardMarkup()
+					changeMenu := tgbotapi.NewInlineKeyboardMarkup(
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Дата и время\n", "4")),
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Адрес погрузки/выгрузки\n", "5")),
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Тип автомобиля\n", "2")),
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Вес груза в кг\n", "3")),
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Объем груза в м3\n", "4")),
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Максимальная длина в м\n", "5")),
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Дополнительная информация", "6")),
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Опубликовать", "6")),
+					)
 
 					if role == 0 {
-						published, err := strconv.ParseInt(update.CallbackQuery.Data, 0, 64)
+						action, err := strconv.ParseInt(ticketMsgArr[0], 0, 64)
 						if err == nil && errTicketNum == nil {
-							if published == 1 {
-								_, err := db.Exec("update tickets set status=1 where customer_id=? and ticket_id=? and status=0", chatID, ticketID)
+							status := 12 // статус по умолчанию после нажатия кнопки одного из действий с заявкой
+							switch action {
+							case 1:
+								_, err := db.Exec("insert into tickets (address, date, options, comments, status, customer_id, car_type, shipment_type, weight, volume, length) select address, date, options, comments, 1, customer_id, car_type, shipment_type, weight, volume, length from tickets where customer_id =? and ticket_id =?", chatID, ticketID)
+								fmt.Println(chatID, ticketID)
 								if err != nil {
 									log.Panic(err)
 								}
-								_, err = db.Exec("update users set status=13 where chat_id=?", chatID)
+								status = 4
+								msgText = "Заявка скопирована. Выберите параметр, который нужно изменить."
+								ticketMenu = changeMenu
+								status = 13
+							case 2:
+								_, err := db.Exec("update tickets set status=2 where customer_id=? and ticket_id=? and status<=1", chatID, ticketID)
 								if err != nil {
 									log.Panic(err)
 								}
-
+								status = 14
 								msgText = "Заявка опубликована. Ожидайте отклики от исполнителей."
-							} else {
-								msgText = "Готово"
+							case 3:
+								msgText = "Выберите параметр, который нужно изменить."
+								ticketMenu = changeMenu
+								status = 13
+							default:
+								_, err := db.Exec("update tickets set status=0 where customer_id=? and ticket_id=?", chatID, ticketID)
+								if err != nil {
+									log.Panic(err)
+								}
+								msgText = "Заявка отменена."
+							}
+							fmt.Println(status)
+							_, err = db.Exec("update users set status=? where chat_id=?", status, chatID)
+							if err != nil {
+								log.Panic(err)
 							}
 						}
 					}
 					msg = tgbotapi.NewMessage(chatID, msgText)
+					if len(ticketMenu.InlineKeyboard) > 0 {
+						msg.ReplyMarkup = ticketMenu
+					}
+				case 13:
+					ticketMsgArr := strings.Fields(update.CallbackQuery.Data)
+					action, err := strconv.ParseInt(ticketMsgArr[0], 0, 64)
+					//ticketID, errTicketNum := strconv.ParseInt(ticketMsgArr[1], 0, 64)
+					if err == nil {
+						switch action {
+						case 4:
+							msgText = "Укажите новое значение - " + update.CallbackQuery.Message.Text
+							msg = tgbotapi.NewMessage(chatID, msgText)
+						}
+						/*CustomerBranch(chatID, int(action), update.Message.Text)
+						_, err = db.Exec("update users set status=12 where chat_id=?", chatID)
+						if err != nil {
+							log.Panic(err)
+						}*/
+					}
 				}
 
 				bot.Send(msg)
