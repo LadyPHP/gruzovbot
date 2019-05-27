@@ -94,11 +94,8 @@ func UpdateTicket(chatID int64, step int, field string, value string) bool {
 	return true
 }
 
-func GetTickets(chatID int64, fieldName string) Ticket {
-	if len(fieldName) < 1 {
-		fieldName = "ticket_id, date, address, comments, car_type, shipment_type, weight, volume, length"
-	}
-	tickets, err := db.Query("select ? from tickets where customer_id=? and status = 1", fieldName, chatID)
+func GetTickets(chatID int64) Ticket {
+	tickets, err := db.Query("select ticket_id, date, address, comments, car_type, shipment_type, weight, volume, length from tickets where customer_id=? and status = 1", chatID)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -109,21 +106,34 @@ func GetTickets(chatID int64, fieldName string) Ticket {
 	}
 	// если есть ранее созданные заказчиком заказы, выводим сообщением со ссылками
 	var ticket Ticket
-	names := make([]string, 0)
 
-	for tickets.Next() {
-		var name string
-		if err := tickets.Scan(&name); err != nil {
-			// Check for a scan error.
-			// Query rows will be closed with defer.
-			log.Fatal(err)
-		}
-		names = append(names, name)
-		fmt.Println(name)
+	err = tickets.Scan(&ticket.ticket_id, &ticket.date, &ticket.address, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length)
+	if err != nil {
+		log.Panic(err)
 	}
-	fmt.Println(names)
-	//ticket = names
+
 	return ticket
+}
+
+func NextStep(chatID int64, step int, fieldName string, inMessage string, msgText string) (msg tgbotapi.MessageConfig) {
+	ticket := GetTickets(chatID)
+	result := UpdateTicket(chatID, step, fieldName, inMessage)
+
+	if &ticket.ticket_id != nil {
+		_, err := db.Exec("update users set status=13 where chat_id=?", chatID)
+		if err == nil {
+			msgText = "Параметр обновлен."
+			msg = tgbotapi.NewMessage(chatID, msgText)
+		}
+	}
+
+	if result == true {
+		msg = tgbotapi.NewMessage(chatID, msgText)
+	} else {
+		log.Panic("Error - update ticket")
+	}
+
+	return msg
 }
 
 func MainMenu(chatID int64, role int64) (msg tgbotapi.ReplyKeyboardMarkup) {
@@ -139,7 +149,6 @@ func MainMenu(chatID int64, role int64) (msg tgbotapi.ReplyKeyboardMarkup) {
 	if err != nil {
 		log.Panic(err)
 	}
-	//fmt.Println(chatID)
 
 	return tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButtonRow(
@@ -158,58 +167,38 @@ func CustomerBranch(chatID int64, step int, inMessage string) {
 
 	switch step {
 	case 4:
+		msgText = "Адрес погрузки/выгрузки"
 		fieldName := "date"
-		ticket := GetTickets(chatID, fieldName)
-		if &ticket.date == nil {
-			result := UpdateTicket(chatID, step, fieldName, inMessage)
-			if result == true {
-				msgText = "Адрес погрузки/выгрузки"
-				msg = tgbotapi.NewMessage(chatID, msgText)
-			}
-		}
+		msg = NextStep(chatID, step, fieldName, inMessage, msgText)
 	case 5:
-		result := UpdateTicket(chatID, step, "address", inMessage)
-		if result == true {
-			msgText = "Тип автомобиля (на выбор один или несколько): закрытый/открытый/рефрижератор"
-			msg = tgbotapi.NewMessage(chatID, msgText)
-		}
+		msgText = "Тип автомобиля (на выбор один или несколько): закрытый/открытый/рефрижератор"
+		fieldName := "address"
+		msg = NextStep(chatID, step, fieldName, inMessage, msgText)
 	case 6:
-		result := UpdateTicket(chatID, step, "car_type", inMessage)
-		if result == true {
-			msgText = "Тип погрузки (на выбор один или несколько): верхняя/задняя/боковая"
-			msg = tgbotapi.NewMessage(chatID, msgText)
-		}
+		msgText = "Тип погрузки (на выбор один или несколько): верхняя/задняя/боковая"
+		fieldName := "car_type"
+		msg = NextStep(chatID, step, fieldName, inMessage, msgText)
 	case 7:
-		result := UpdateTicket(chatID, step, "shipment_type", inMessage)
-		if result == true {
-			msgText = "Вес груза, кг"
-			msg = tgbotapi.NewMessage(chatID, msgText)
-		}
+		msgText = "Вес груза, кг"
+		fieldName := "shipment_type"
+		msg = NextStep(chatID, step, fieldName, inMessage, msgText)
 	case 8:
-		if err == nil {
-			result := UpdateTicket(chatID, step, "weight", inMessage)
-			if result == true {
-				msgText = "Объем груза, м3"
-				msg = tgbotapi.NewMessage(chatID, msgText)
-			}
-		}
+		msgText = "Объем груза, м3"
+		fieldName := "weight"
+		msg = NextStep(chatID, step, fieldName, inMessage, msgText)
 	case 9:
-		result := UpdateTicket(chatID, step, "volume", inMessage)
-		if result == true {
-			msgText = "Максимальная длина, м (если известна)"
-			msg = tgbotapi.NewMessage(chatID, msgText)
-		}
+		msgText = "Максимальная длина, м (если известна)"
+		fieldName := "volume"
+		msg = NextStep(chatID, step, fieldName, inMessage, msgText)
 	case 10:
-		result := UpdateTicket(chatID, step, "length", inMessage)
-		if result == true {
-			msgText = "Дополнительная информация"
-			msg = tgbotapi.NewMessage(chatID, msgText)
-		}
+		msgText = "Дополнительная информация"
+		fieldName := "length"
+		msg = NextStep(chatID, step, fieldName, inMessage, msgText)
 	case 11:
+		ticket := GetTickets(chatID)
 		result := UpdateTicket(chatID, step, "comments", inMessage)
 		if result == true {
 			msgText = "Проверьте информацию и подтвердите публикацию заявки."
-			ticket := GetTickets(chatID, "")
 			// обновляем шаг пользователя
 			_, err = db.Exec("update users set status=? where chat_id=?", step+1, chatID)
 			if err != nil {
@@ -232,6 +221,8 @@ func CustomerBranch(chatID int64, step int, inMessage string) {
 					tgbotapi.NewInlineKeyboardButtonData("Отменить", "0"),
 				),
 			)
+			fmt.Println(chatID)
+			fmt.Println(&ticket.ticket_id)
 		}
 	default:
 		switch inMessage {
@@ -515,11 +506,11 @@ func main() {
 						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Дата и время", "4")),
 						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Адрес погрузки/выгрузки", "5")),
 						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Тип автомобиля", "6")),
-						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Вес груза в кг", "7")),
-						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Объем груза в м3", "8")),
-						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Максимальная длина в м", "9")),
-						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Дополнительная информация", "10")),
-						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Опубликовать", "11")),
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Тип погрузки", "7")),
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Вес груза в кг", "8")),
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Объем груза в м3", "9")),
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Максимальная длина в м", "10")),
+						tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Добавить комментарий и опубликовать", "11")),
 					)
 
 					if role == 0 {
