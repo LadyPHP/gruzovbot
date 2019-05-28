@@ -117,6 +117,9 @@ func GetTickets(chatID int64) Ticket {
 
 func NextStep(chatID int64, step int, fieldName string, inMessage string, msgText string) (msg tgbotapi.MessageConfig) {
 	ticket := GetTickets(chatID)
+	if step == 4 {
+		inMessage = fmt.Sprintln(inMessage, ".", &ticket.date)
+	}
 	result := UpdateTicket(chatID, step, fieldName, inMessage)
 
 	if &ticket.ticket_id != nil {
@@ -216,9 +219,9 @@ func CustomerBranch(chatID int64, step int, inMessage string) {
 			// отправляем кнопки
 			msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("Опубликовать", "1"),
-					tgbotapi.NewInlineKeyboardButtonData("Редактировать", "2"),
-					tgbotapi.NewInlineKeyboardButtonData("Отменить", "0"),
+					tgbotapi.NewInlineKeyboardButtonData("Опубликовать", fmt.Sprintf("2 %d", ticket.ticket_id)),
+					tgbotapi.NewInlineKeyboardButtonData("Редактировать", fmt.Sprintf("3 %d", ticket.ticket_id)),
+					tgbotapi.NewInlineKeyboardButtonData("Отменить", fmt.Sprintf("0 %d", ticket.ticket_id)),
 				),
 			)
 			fmt.Println(chatID)
@@ -227,9 +230,6 @@ func CustomerBranch(chatID int64, step int, inMessage string) {
 	default:
 		switch inMessage {
 		case "Создать новую":
-			msgText = "Время и дата погрузки"
-			msg = tgbotapi.NewMessage(chatID, msgText)
-
 			// создаем запись в БД о новой заявке
 			result, err := db.Exec("insert into tickets (customer_id, status) values (?, 1)", chatID)
 			InsertTicket, err = result.LastInsertId()
@@ -238,8 +238,17 @@ func CustomerBranch(chatID int64, step int, inMessage string) {
 			}
 			// обновляем шаг для пользователя
 			_, err = db.Exec("update users set status=4 where chat_id=?", chatID)
-			if err != nil {
-				log.Panic(err)
+			if err == nil {
+				msgText = "Выберите месяц"
+				msg = tgbotapi.NewMessage(chatID, msgText)
+				msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Январь", fmt.Sprintf("01 %d", InsertTicket)), tgbotapi.NewInlineKeyboardButtonData("Февраль", fmt.Sprintf("02 %d", InsertTicket))),
+					tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Март", fmt.Sprintf("03 %d", InsertTicket)), tgbotapi.NewInlineKeyboardButtonData("Апрель", fmt.Sprintf("04 %d", InsertTicket))),
+					tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Май", fmt.Sprintf("05 %d", InsertTicket)), tgbotapi.NewInlineKeyboardButtonData("Июнь", fmt.Sprintf("06 %d", InsertTicket))),
+					tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Июль", fmt.Sprintf("07 %d", InsertTicket)), tgbotapi.NewInlineKeyboardButtonData("Август", fmt.Sprintf("08 %d", InsertTicket))),
+					tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Сентябрь", fmt.Sprintf("09 %d", InsertTicket)), tgbotapi.NewInlineKeyboardButtonData("Октябрь", fmt.Sprintf("10 %d", InsertTicket))),
+					tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Ноябрь", fmt.Sprintf("11 %d", InsertTicket)), tgbotapi.NewInlineKeyboardButtonData("Декабрь", fmt.Sprintf("12 %d", InsertTicket))),
+				)
 			}
 		case "История заявок":
 			tickets, err := db.Query("select ticket_id, status, date, address, comments, car_type, shipment_type, weight, volume, length from tickets where customer_id=? order by ticket_id", chatID)
@@ -497,6 +506,16 @@ func main() {
 					_, err = db.Exec("update users set status=3, role=? where chat_id=?", role, chatID)
 					if err != nil {
 						log.Panic(err)
+					}
+				case 4:
+					fmt.Println(update.CallbackQuery.Data)
+					ticketMsgArr := strings.Fields(update.CallbackQuery.Data)
+					ticketID, errTicketNum := strconv.ParseInt(ticketMsgArr[1], 0, 64)
+					month, err := strconv.ParseInt(ticketMsgArr[0], 0, 64)
+					_, err = db.Exec("update tickets set date=? where ticket_id=? and customer_id=? and status=1", month, ticketID, chatID)
+					if err == nil && errTicketNum == nil {
+						msgText = "Введите дату (только число):"
+						msg = tgbotapi.NewMessage(chatID, msgText)
 					}
 				case 12:
 					ticketMsgArr := strings.Fields(update.CallbackQuery.Data)
