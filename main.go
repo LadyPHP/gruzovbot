@@ -118,7 +118,7 @@ func GetTickets(chatID int64) Ticket {
 func NextStep(chatID int64, step int, fieldName string, inMessage string, msgText string) (msg tgbotapi.MessageConfig) {
 	ticket := GetTickets(chatID)
 	if step == 4 {
-		inMessage = fmt.Sprintln(inMessage, ".", &ticket.date)
+		inMessage = fmt.Sprintln(inMessage, ".", ticket.date)
 	}
 	result := UpdateTicket(chatID, step, fieldName, inMessage)
 
