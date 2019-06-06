@@ -417,6 +417,8 @@ func main() {
 		if update.Message != nil { // если текстовое сообщение
 			chatID := update.Message.Chat.ID
 			userName := update.Message.Chat.LastName + " " + update.Message.Chat.FirstName
+			fmt.Println(chatID)
+			fmt.Println(update.Message.Text)
 
 			// Определяем есть ли пользователь в базе и на каком он шаге
 			users, err := db.Query("select * from users where chat_id=?", chatID)
@@ -443,15 +445,18 @@ func main() {
 				role = user.role
 			}
 
+			msgText := ""
+
 			// Обработчик команд
 			if update.Message.IsCommand() { // если это команда
 				switch update.Message.Command() {
 				case "start":
 					step = 0
+				case "help":
+					msgText = "Добро пожаловать в чат-бот. Здесь Вы можете зарегистрироваться, после чего выбрать роль. В зависимости от роли Вы можете либо оформлять заявки на перевозку, либо получать эти заявки для исполенения. Для начала работы введите команду /start"
 				}
 			}
 
-			msgText := ""
 			msg := tgbotapi.NewMessage(chatID, msgText)
 
 			// Обработчик по полученным состояниям (шагам)
@@ -637,6 +642,14 @@ func main() {
 								status = 14
 								msgText = "Заявка опубликована. Ожидайте отклики от исполнителей."
 								extMsg := tgbotapi.NewMessage(-1001370763028, "Новая заявка")
+								bidButton := tgbotapi.NewInlineKeyboardMarkup(
+									tgbotapi.NewInlineKeyboardRow(
+										tgbotapi.NewInlineKeyboardButtonURL("1.com", "http://t.me/devnil_bot?help"),
+										//tgbotapi.NewInlineKeyboardButtonSwitch("2sw","open devnil_bot"),
+										tgbotapi.NewInlineKeyboardButtonData("Предложить цену", fmt.Sprintf("bid %d", ticketID)),
+									),
+								)
+								extMsg.ReplyMarkup = bidButton
 								bot.Send(extMsg)
 							case 3:
 								msgText = "Выберите параметр, который нужно изменить."
