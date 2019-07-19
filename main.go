@@ -109,7 +109,7 @@ func changeRole(chatID int64) (msg tgbotapi.MessageConfig) {
 	msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("Заказчик", `{"step":1, "role":0}`),
-			tgbotapi.NewInlineKeyboardButtonData("Перевозчик", `{"step":1, "role":1}`),
+			tgbotapi.NewInlineKeyboardButtonData("Перевозчик", `{"step":100, "role":1}`),
 		),
 	)
 
@@ -160,7 +160,7 @@ func getTicketInfo(chatID int64, ticketID string, status int) (tickets *sql.Rows
 	//defer tickets.Close()
 
 	if tickets.Next() == false {
-		log.Panic(err)
+		log.Println(err)
 	}
 
 	return tickets
@@ -457,7 +457,7 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 	var buttonInline tgbotapi.InlineKeyboardMarkup
 
 	switch step {
-	case 1:
+	case 100:
 		_, err := db.Exec("update users set status=?, role=1 where chat_id=?", step, chatID)
 		if err != nil {
 			log.Panic(err)
@@ -471,7 +471,7 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 				tgbotapi.NewKeyboardButton("Изменить роль"),
 			),
 		)
-	case 2:
+	case 101:
 		tickets := getTicketInfo(chatID, data, 2)
 		defer tickets.Close()
 
@@ -510,13 +510,13 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 				msgCustom := tgbotapi.NewMessage(chatID, messageCustom)
 				msgCustom.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 					tgbotapi.NewInlineKeyboardRow(
-						tgbotapi.NewInlineKeyboardButtonData("Предложить цену", fmt.Sprintf(`{"step":3, "data":"%d"}`, ticket.ticket_id)),
+						tgbotapi.NewInlineKeyboardButtonData("Предложить цену", fmt.Sprintf(`{"step":102, "data":"%d"}`, ticket.ticket_id)),
 					),
 				)
 				bot.Send(msgCustom)
 			}
 			// обновляем шаг для пользователя
-			_, err := db.Exec("update users set status=12 where chat_id=?", chatID)
+			_, err := db.Exec("update users set status=102 where chat_id=?", chatID)
 			if err != nil {
 				log.Panic(err)
 			}
@@ -524,7 +524,7 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 			message = "Пока нет новых опубликованных заявок. Попробуйте проверить позже. Либо включите уведомления на канале @gruzov_v"
 		}
 
-	case 3:
+	case 102:
 		// создаем запись в БД о том, что перевозчик взял заявку
 		result, err := db.Exec("insert into bid (performer_id, ticket_id, status) values (?, ?, 0)", chatID, data)
 		_, err = result.LastInsertId()
@@ -540,12 +540,12 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 		message = "Выберите тип рассчета:"
 		buttonInline = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Ставка", `{"step":4, "data":"0"}`),
-				tgbotapi.NewInlineKeyboardButtonData("Фиксированная стоимость", `{"step":4, "data":"1"}`),
+				tgbotapi.NewInlineKeyboardButtonData("Ставка", `{"step":103, "data":"0"}`),
+				tgbotapi.NewInlineKeyboardButtonData("Фиксированная стоимость", `{"step":103, "data":"1"}`),
 			),
 		)
-	case 4:
-		_, err := db.Exec("update bid set status=1, type_price=? where chat_id=? and status=0", data, chatID)
+	case 103:
+		_, err := db.Exec("update bid set status=1, type_price=? where performer_id=? and status=0", data, chatID)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -560,8 +560,8 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 		if data == "0" {
 			message = "Вы выбрали фиксированный способ расчета. Укажите стоимость (в рублях)"
 		}
-	case 5:
-		_, err := db.Exec("update bid set price=? where chat_id=? and status=1", data, chatID)
+	case 104:
+		_, err := db.Exec("update bid set price=? where performer_id=? and status=1", data, chatID)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -574,11 +574,11 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 		message = "Вы указали - " + data + ". Отправить запрос заказчику?"
 		buttonInline = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Да", `{"step":6, "data":"1"}`),
-				tgbotapi.NewInlineKeyboardButtonData("Отменить", `{"step":6, "data":"0"}`),
+				tgbotapi.NewInlineKeyboardButtonData("Да", `{"step":105, "data":"1"}`),
+				tgbotapi.NewInlineKeyboardButtonData("Отменить", `{"step":105, "data":"0"}`),
 			),
 		)
-	case 6:
+	case 105:
 		if data == "1" {
 			//TODO: уведомление заказчику
 			message = "Я отправил уведомление заказчику. Если его заинтересует Ваше предложение, я пришлю его контакты"
@@ -689,7 +689,7 @@ func main() {
 
 			fmt.Println(role)
 
-			if role == 0 {
+			if role == 0 || step < 100 {
 				msg = ticketHandlerClient(step, data, chatID)
 				// Отправляем сообщение о новой заявке в общий канал
 				if step == 12 {
