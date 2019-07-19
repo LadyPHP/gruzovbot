@@ -53,6 +53,15 @@ type Ticket struct {
 	length        float64
 }
 
+type Bid struct {
+	BidID       uint
+	PerformerID int
+	TicketID    int
+	Status      int
+	Price       string
+	TypePrice   int
+}
+
 func GetConfig() {
 	file, _ := os.Open("config.json")
 	decoder := json.NewDecoder(file)
@@ -203,7 +212,7 @@ func Commands(chatID int64, user string, command string) (msg tgbotapi.MessageCo
 			buttonInline = tgbotapi.NewInlineKeyboardMarkup(
 				tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData("Заказчик", `{"step":1, "role":0}`),
-					tgbotapi.NewInlineKeyboardButtonData("Перевозчик", `{"step":1, "role":1}`),
+					tgbotapi.NewInlineKeyboardButtonData("Перевозчик", `{"step":100, "role":1}`),
 				),
 			)
 		}
@@ -340,7 +349,7 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 			)
 		}
 	case 12:
-		_, err := db.Exec("update tickets set status=2 where customer_id=? and ticket_id=? and status=1", chatID, data)
+		_, err := db.Exec("update tickets set status=2 where customer_id=? and ticket_id=? and status<2", chatID, data)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -348,7 +357,7 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 	case 13:
 		//TODO: возможность редактирования заявки, если status < 2
 	case 14:
-		_, err := db.Exec("update tickets set status=0 where customer_id=? and ticket_id=?", chatID, data)
+		_, err := db.Exec("update tickets set status=0 where customer_id=? and ticket_id=? and status<=2", chatID, data)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -370,6 +379,7 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 		)
 
 	case 16: // Итория заявок
+		//TODO: не показывает первую заявку
 		tickets := getTicketInfo(chatID, "0", 0)
 		defer tickets.Close()
 
@@ -525,25 +535,68 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 		}
 
 	case 102:
-		// создаем запись в БД о том, что перевозчик взял заявку
-		result, err := db.Exec("insert into bid (performer_id, ticket_id, status) values (?, ?, 0)", chatID, data)
-		_, err = result.LastInsertId()
+		// проверяем есть ли уже запрос на исполнение этой заявки этим перевозчиком
+		bids, err := db.Query("select bid_id, status, price, type_price from bid where performer_id=? and ticket_id=?", chatID, data)
 		if err != nil {
 			log.Panic(err)
+		}
+		defer bids.Close()
+
+		message = "Выберите тип рассчета:"
+		buttonInlineTmp := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("Ставка", `{"step":103, "data":"0"}`),
+				tgbotapi.NewInlineKeyboardButtonData("Фиксированная стоимость", `{"step":103, "data":"1"}`),
+			),
+		)
+
+		if bids.Next() == false {
+			// если нет создаем запись в БД о том, что перевозчик взял заявку
+			result, err := db.Exec("insert into bid (performer_id, ticket_id, status) values (?, ?, 0)", chatID, data)
+			_, err = result.LastInsertId()
+			if err != nil {
+				log.Panic(err)
+			}
+
+			buttonInline = buttonInlineTmp
+
+		} else {
+			// иначе уведомляем и спрашиваем хочет ли обновить
+			var bid Bid
+			err = bids.Scan(&bid.BidID, &bid.Status, &bid.Price, &bid.TypePrice)
+			if err != nil {
+				log.Panic(err)
+			}
+
+			// если уже проставлены значения (status = 1)
+			if bid.Status == 2 {
+				typePrice := "ставка (руб./час)"
+
+				if bid.TypePrice == 1 {
+					typePrice = "фиксированный"
+				}
+
+				message = "Вы уже откликались на данную заявку " + data + ", указав следующие данные: \n" +
+					"\n Тип расчета - " + typePrice +
+					"\n Стоимость - " + bid.Price +
+					"\n Если хотите обновить данные, то для продолжения выберите тип рассчета: "
+				buttonInline = buttonInlineTmp
+			} else if bid.Status > 2 {
+				message = "Ваш отклик уже был отправлен заказчику ранее. На этом этапе информацию изменить нельзя. Дождитесь, когда заказчик свяжется с Вами."
+			} else if bid.Status < 2 {
+				_, err := db.Exec("update bid set status=0 where performer_id=? and bid_id=?", chatID, bid.BidID)
+				if err != nil {
+					log.Panic(err)
+				}
+
+				buttonInline = buttonInlineTmp
+			}
 		}
 
 		_, err = db.Exec("update users set status=? where chat_id=?", step+1, chatID)
 		if err != nil {
 			log.Panic(err)
 		}
-
-		message = "Выберите тип рассчета:"
-		buttonInline = tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Ставка", `{"step":103, "data":"0"}`),
-				tgbotapi.NewInlineKeyboardButtonData("Фиксированная стоимость", `{"step":103, "data":"1"}`),
-			),
-		)
 	case 103:
 		_, err := db.Exec("update bid set status=1, type_price=? where performer_id=? and status=0", data, chatID)
 		if err != nil {
@@ -555,13 +608,13 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 			log.Panic(err)
 		}
 
-		message = "Вы выбрали способ расчета - ставка. Укажите ее размер (в рублях)"
+		message = "Вы выбрали способ расчета - ставка. Укажите ее размер (руб./час)"
 
-		if data == "0" {
+		if data == "1" {
 			message = "Вы выбрали фиксированный способ расчета. Укажите стоимость (в рублях)"
 		}
 	case 104:
-		_, err := db.Exec("update bid set price=? where performer_id=? and status=1", data, chatID)
+		_, err := db.Exec("update bid set price=?, status=2 where performer_id=? and status=1", data, chatID)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -571,19 +624,52 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 			log.Panic(err)
 		}
 
-		message = "Вы указали - " + data + ". Отправить запрос заказчику?"
+		message = "Вы указали - " + data + "руб. Отправить запрос заказчику?"
 		buttonInline = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("Да", `{"step":105, "data":"1"}`),
-				tgbotapi.NewInlineKeyboardButtonData("Отменить", `{"step":105, "data":"0"}`),
+				tgbotapi.NewInlineKeyboardButtonData("Да", `{"step":105, "data":"3"}`),
+				tgbotapi.NewInlineKeyboardButtonData("Отменить", `{"step":105, "data":"7"}`),
 			),
 		)
 	case 105:
-		if data == "1" {
+		_, err := db.Exec("update bid set status=? where performer_id=? and status=2", data, chatID)
+		if err != nil {
+			log.Panic(err)
+		}
+
+		message = "Запрос отменен."
+
+		if data == "3" {
 			//TODO: уведомление заказчику
-			message = "Я отправил уведомление заказчику. Если его заинтересует Ваше предложение, я пришлю его контакты"
-		} else {
-			message = "Запрос отменен."
+			_, err := db.Exec("update users set status=? where chat_id=?", step+1, chatID)
+			if err != nil {
+				log.Panic(err)
+			}
+
+			tickets, err := db.Query("select t.customer_id from bid b left join tickets t on t.ticket_id = b.ticket_id where b.performer_id=? and b.status=?", chatID, data)
+			if err != nil {
+				log.Panic(err)
+			}
+			defer tickets.Close()
+
+			if tickets.Next() != false {
+				var ticket Ticket
+				err = tickets.Scan(&ticket.customer_id)
+				if err != nil {
+					log.Panic(err)
+				}
+
+				bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
+				if err != nil {
+					log.Panic(err)
+				}
+
+				clientChatID := int64(ticket.customer_id)
+				msgClient := tgbotapi.NewMessage(clientChatID, "Новый отклик на Вашу заявку")
+				bot.Send(msgClient)
+
+				message = "Я отправил уведомление заказчику. Если его заинтересует Ваше предложение, он свяжется с Вами по номеру телефона, который Вы указали при регистрации"
+			}
 		}
 	}
 
@@ -652,10 +738,14 @@ func main() {
 				case "Изменить роль":
 					msg = changeRole(chatID)
 				case "Все новые заявки":
-					msg = ticketHandlerExecutant(2, "0", chatID)
+					msg = ticketHandlerExecutant(101, "0", chatID)
 				default:
 					step := getStep(chatID)
-					msg = ticketHandlerClient(step, update.Message.Text, chatID)
+					if step < 100 {
+						msg = ticketHandlerClient(step, update.Message.Text, chatID)
+					} else {
+						msg = ticketHandlerExecutant(step, update.Message.Text, chatID)
+					}
 				}
 			}
 
@@ -689,7 +779,7 @@ func main() {
 
 			fmt.Println(role)
 
-			if role == 0 || step < 100 {
+			if role == 0 && step < 100 {
 				msg = ticketHandlerClient(step, data, chatID)
 				// Отправляем сообщение о новой заявке в общий канал
 				if step == 12 {
