@@ -330,7 +330,7 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 				log.Panic(err)
 			}
 			message = "Проверьте информацию и подтвердите публикацию заявки. \n" +
-				fmt.Sprintln("№ + ", ticket.ticket_id,
+				fmt.Sprintln("№", ticket.ticket_id,
 					", \nДата и время: ", ticket.date,
 					", \nАдрес погрузки: ", ticket.address_to,
 					", \nАдрес выгрузки: ", ticket.address_from,
@@ -418,7 +418,7 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 					//btnData2 = fmt.Sprintf(`{"step":13, "data":"%d"}`, ticket.ticket_id)
 				}
 				messageCustom := fmt.Sprintln(
-					"№ + ", ticket.ticket_id,
+					"№", ticket.ticket_id,
 					", \n Дата и время: ", ticket.date,
 					", \n Адрес погрузки: ", ticket.address_to,
 					", \n Адрес выгрузки: ", ticket.address_from,
@@ -505,7 +505,7 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 		if len(ticketsRows) > 0 {
 			for _, ticket := range ticketsRows {
 				messageCustom := fmt.Sprintln(
-					"№ + ", ticket.ticket_id,
+					"№", ticket.ticket_id,
 					", \n Дата и время: ", ticket.date,
 					", \n Адрес погрузки: ", ticket.address_to,
 					", \n Адрес выгрузки: ", ticket.address_from,
@@ -640,13 +640,102 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 		message = "Запрос отменен."
 
 		if data == "3" {
-			//TODO: уведомление заказчику
 			_, err := db.Exec("update users set status=? where chat_id=?", step+1, chatID)
 			if err != nil {
 				log.Panic(err)
 			}
 
-			tickets, err := db.Query("select t.customer_id from bid b left join tickets t on t.ticket_id = b.ticket_id where b.performer_id=? and b.status=?", chatID, data)
+			bids, err := db.Query("select ticket_id, type_price, price, bid_id from bid where status=? and performer_id=?", data, chatID)
+			if err != nil {
+				log.Panic(err)
+			}
+			defer bids.Close()
+
+			if bids.Next() != false {
+				var bid Bid
+				err = bids.Scan(&bid.TicketID, &bid.TypePrice, &bid.Price, &bid.BidID)
+				if err != nil {
+					log.Panic(err)
+				}
+
+				tickets, err := db.Query("select customer_id, ticket_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments from tickets where ticket_id=?", bid.TicketID)
+				if err != nil {
+					log.Panic(err)
+				}
+				defer tickets.Close()
+
+				if tickets.Next() != false {
+					var ticket Ticket
+					err = tickets.Scan(&ticket.customer_id, &ticket.ticket_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length, &ticket.comments)
+					if err != nil {
+						log.Panic(err)
+					}
+
+					bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
+					if err != nil {
+						log.Panic(err)
+					}
+
+					clientChatID := int64(ticket.customer_id)
+					typePrice := "ставка (руб./час)"
+
+					if bid.TypePrice == 1 {
+						typePrice = "фиксированный"
+					}
+					messageClient := "Новый отклик на Вашу заявку " +
+						fmt.Sprintln(
+							"№", ticket.ticket_id,
+							", \n Дата и время: ", ticket.date,
+							", \n Адрес погрузки: ", ticket.address_to,
+							", \n Адрес выгрузки: ", ticket.address_from,
+							", \n Комментарий: ", ticket.comments,
+							", \n Тип автомобиля: ", ticket.car_type,
+							", \n Тип погрузчика: ", ticket.shipment_type,
+							", \n Вес (кг): ", ticket.weight,
+							", \n Объем (м3): ", ticket.volume,
+							", \n Макс.длина (м): ", ticket.length,
+						) + "\n\n Предложение от перевозчика: " +
+						fmt.Sprintln(
+							"\n Тип рассчетов: ", typePrice,
+							"\n Прайс: ", bid.Price,
+						)
+
+					buttonClient := tgbotapi.NewInlineKeyboardMarkup(
+						tgbotapi.NewInlineKeyboardRow(
+							//TODO: продумать шаг для отправки уведомлений заказчику (контакты исполнителя) и перевозчику (что его предложение принято)
+							tgbotapi.NewInlineKeyboardButtonData("Выбрать исполнителем", fmt.Sprintf(`{"step":106, "data":"%d"}`, bid.BidID)),
+						),
+					)
+
+					msgClient := tgbotapi.NewMessage(clientChatID, messageClient)
+					msgClient.ReplyMarkup = buttonClient
+					bot.Send(msgClient)
+
+					message = "Я отправил уведомление заказчику. Если его заинтересует Ваше предложение, он свяжется с Вами по номеру телефона, который Вы указали при регистрации"
+				}
+			}
+		}
+
+	case 106:
+		_, err := db.Exec("update users set status=? where chat_id=?", step+1, chatID)
+		if err != nil {
+			log.Panic(err)
+		}
+
+		bids, err := db.Query("select ticket_id, type_price, price, bid_id from bid where status=4 and performer_id=?", data, chatID)
+		if err != nil {
+			log.Panic(err)
+		}
+		defer bids.Close()
+
+		if bids.Next() != false {
+			var bid Bid
+			err = bids.Scan(&bid.TicketID, &bid.TypePrice, &bid.Price, &bid.BidID)
+			if err != nil {
+				log.Panic(err)
+			}
+
+			tickets, err := db.Query("select customer_id, ticket_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments from tickets where ticket_id=?", bid.TicketID)
 			if err != nil {
 				log.Panic(err)
 			}
@@ -654,7 +743,7 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 
 			if tickets.Next() != false {
 				var ticket Ticket
-				err = tickets.Scan(&ticket.customer_id)
+				err = tickets.Scan(&ticket.customer_id, &ticket.ticket_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length, &ticket.comments)
 				if err != nil {
 					log.Panic(err)
 				}
@@ -665,8 +754,31 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 				}
 
 				clientChatID := int64(ticket.customer_id)
-				msgClient := tgbotapi.NewMessage(clientChatID, "Новый отклик на Вашу заявку")
-				bot.Send(msgClient)
+				typePrice := "ставка (руб./час)"
+
+				if bid.TypePrice == 1 {
+					typePrice = "фиксированный"
+				}
+				messageExecutor := "Заявка на исполнении: " +
+					fmt.Sprintln(
+						"№", ticket.ticket_id,
+						", \n Дата и время: ", ticket.date,
+						", \n Адрес погрузки: ", ticket.address_to,
+						", \n Адрес выгрузки: ", ticket.address_from,
+						", \n Комментарий: ", ticket.comments,
+						", \n Тип автомобиля: ", ticket.car_type,
+						", \n Тип погрузчика: ", ticket.shipment_type,
+						", \n Вес (кг): ", ticket.weight,
+						", \n Объем (м3): ", ticket.volume,
+						", \n Макс.длина (м): ", ticket.length,
+					) + "\n " +
+					fmt.Sprintln(
+						"\n Тип рассчетов: ", typePrice,
+						"\n Прайс: ", bid.Price,
+					)
+
+				msgExecutor := tgbotapi.NewMessage(clientChatID, messageExecutor)
+				bot.Send(msgExecutor)
 
 				message = "Я отправил уведомление заказчику. Если его заинтересует Ваше предложение, он свяжется с Вами по номеру телефона, который Вы указали при регистрации"
 			}
@@ -683,6 +795,35 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 	}
 
 	return msg
+}
+
+func ticketHandlerClientAndExecutant(step int, data string) (err error) {
+	var message string
+	var messageClient string
+	var messageExecutor string
+	//var button tgbotapi.ReplyKeyboardMarkup
+	//var buttonInline tgbotapi.InlineKeyboardMarkup
+
+	switch step {
+	case 200:
+		messageClient = "test"
+		messageExecutor = "test"
+	}
+
+	msgClient := tgbotapi.NewMessage(0, messageClient)
+	msgExecutor := tgbotapi.NewMessage(0, messageExecutor)
+	extMsg := tgbotapi.NewMessage(-1001370763028, message)
+
+	botClient, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	_, err = botClient.Send(msgClient)
+	_, err = botClient.Send(msgExecutor)
+	_, err = botClient.Send(extMsg)
+
+	return err
 }
 
 func main() {
@@ -739,6 +880,8 @@ func main() {
 					msg = changeRole(chatID)
 				case "Все новые заявки":
 					msg = ticketHandlerExecutant(101, "0", chatID)
+				case "Исполняемые мной":
+					msg = ticketHandlerExecutant(106, "0", chatID)
 				default:
 					step := getStep(chatID)
 					if step < 100 {
@@ -792,7 +935,7 @@ func main() {
 						log.Panic(err)
 					}
 					message := "Новая заявка: \n" +
-						fmt.Sprintln("№ + ", ticket.ticket_id,
+						fmt.Sprintln("№", ticket.ticket_id,
 							", \nДата и время: ", ticket.date,
 							", \nАдрес погрузки: ", ticket.address_to,
 							", \nАдрес выгрузки: ", ticket.address_from,
@@ -814,8 +957,13 @@ func main() {
 					extMsg.ReplyMarkup = bidButton
 					bot.Send(extMsg)
 				}
-			} else {
+			} else if step > 100 && step < 200 {
 				msg = ticketHandlerExecutant(step, data, chatID)
+			} else {
+				err = ticketHandlerClientAndExecutant(step, data)
+				if err != nil {
+					log.Panic(err)
+				}
 			}
 
 		}
