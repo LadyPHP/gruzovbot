@@ -37,13 +37,6 @@ type stepData struct {
 	Role int
 }
 
-type finalyStepData struct {
-	BidID       uint
-	PerformerID int64
-	TicketID    uint
-	CustomerID  int64
-}
-
 type Ticket struct {
 	ticket_id     uint
 	date          string
@@ -193,13 +186,13 @@ func Commands(chatID int64, user string, command string) (msg tgbotapi.MessageCo
 	case "help":
 		message = "Что умеет этот бот: \n " +
 			"Регистрировать новых пользователей /registration \n" +
-			"Выбирать роль - /role \n" +
+			"Выбирать роль - по кнопке в меню 'Изменить роль' \n" +
 			"Для заказчика: \n" +
-			"Создавать заявки на перевозку - /create \n" +
-			"Отслеживать статус заявок /history \n" +
+			"Создавать заявки на перевозку - по кнопке в меню 'Создать новую заявку' \n" +
+			"Отслеживать статус заявок - по кнопке в меню 'История заявок' \n" +
 			"Для исполнителя: \n" +
-			"Получать уведомления о новых заказах - /notification \n" +
-			"Предлагать тип ставки и цену сделки - /deal"
+			"Получать уведомления о новых заказах - для этого подпишитесь на канал @gruzov_v \n" +
+			"Предлагать тип ставки и цену сделки - для этого просто откликнитесь на заявку и выберите тип рассчета: фиксированный или почасовую ставку."
 	case "registration":
 		result := CheckUser(chatID)
 		if result == false {
