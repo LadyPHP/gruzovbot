@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 )
 
 var db *sql.DB
@@ -38,19 +39,20 @@ type stepData struct {
 }
 
 type Ticket struct {
-	ticket_id     uint
-	date          string
-	address_to    string
-	address_from  string
-	options       string
-	comments      string
-	status        int
-	customer_id   int
-	car_type      string
-	shipment_type string
-	weight        float64
-	volume        float64
-	length        float64
+	ticket_id         uint
+	date              string
+	address_to        string
+	address_from      string
+	options           string
+	comments          string
+	status            int
+	customer_id       int
+	car_type          string
+	shipment_type     string
+	weight            float64
+	volume            float64
+	length            float64
+	chanel_message_id int
 }
 
 type Bid struct {
@@ -175,10 +177,19 @@ func getTicketInfo(chatID int64, ticketID string, status int) (tickets *sql.Rows
 	return tickets
 }
 
-func Commands(chatID int64, user string, command string) (msg tgbotapi.MessageConfig) {
+func Commands(chatID int64, user string, command string, data string) (msg tgbotapi.MessageConfig) {
 	message := "Здравствуйте " + user + "! \n"
 	var button tgbotapi.ReplyKeyboardMarkup
 	var buttonInline tgbotapi.InlineKeyboardMarkup
+	var ticketID int64
+
+	if len(data) > 7 {
+		data = strings.ReplaceAll(data, "/start ", "")
+		ticketID, _ = strconv.ParseInt(data, 0, 64)
+		if ticketID > 0 {
+			command = "registration"
+		}
+	}
 
 	switch command {
 	case "start":
@@ -213,6 +224,22 @@ func Commands(chatID int64, user string, command string) (msg tgbotapi.MessageCo
 				tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData("Заказчик", `{"step":1, "role":0}`),
 					tgbotapi.NewInlineKeyboardButtonData("Перевозчик", `{"step":100, "role":1}`),
+				),
+			)
+		}
+
+		// если при переходе в бота был указан id заявки, то считаем это откликом от перевозчика
+		// и выдаем ему сразу же соответствующий функционал
+		if ticketID > 0 {
+			_, err := db.Exec("update users set role=1 where chat_id=?", chatID)
+			if err != nil {
+				log.Panic(err)
+			}
+
+			message = "Вы уже зарегистрированы как перевозчик. Для продолжения нажмите кнопку."
+			buttonInline = tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("Предложить цену", fmt.Sprintf(`{"step":102, "data":"%d"}`, ticketID)),
 				),
 			)
 		}
@@ -253,11 +280,32 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 	case 2:
 		message = "Укажите адрес погрузки"
 		if len(data) < 1 {
-			// создаем запись в БД о новой заявке
-			result, err := db.Exec("insert into tickets (customer_id, status) values (?, 1)", chatID)
-			_, err = result.LastInsertId()
+			tickets, err := db.Query("select ticket_id from tickets where customer_id=? and status=1 limit 1", chatID)
 			if err != nil {
 				log.Panic(err)
+			}
+			defer tickets.Close()
+			if tickets.Next() == false {
+				// создаем запись в БД о новой заявке
+				result, err := db.Exec("insert into tickets (customer_id, status) values (?, 1)", chatID)
+				_, err = result.LastInsertId()
+				if err != nil {
+					log.Panic(err)
+				}
+			} else {
+				//TODO: дописать предложить продолжить заполнение заявки или удалить ее
+				var ticket Ticket
+				err := tickets.Scan(&ticket.ticket_id)
+				if err != nil {
+					log.Panic(err)
+				}
+				message = "У вас уже есть заявка, которую вы начали заполнять. Хотите заполнить ее заново?"
+				buttonInline = tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("Да", fmt.Sprintf(`{"step":2, "data":"%d"}`, ticket.ticket_id)),
+						tgbotapi.NewInlineKeyboardButtonData("Нет, отменить прежнюю.", fmt.Sprintf(`{"step":14, "data":"%d"}`, ticket.ticket_id)),
+					),
+				)
 			}
 		} else {
 			UpdateTicket(chatID, step, "status", "1")
@@ -274,29 +322,134 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 		message = "Дата и время погрузки"
 		UpdateTicket(chatID, step, "address_from", data)
 	case 5:
-		//TODO: добавить множественный выбор
-		message = "Тип автомобиля"
+		message = "Тип автомобиля (чтобы выбрать несколько, нажмите на нужные по одному разу)"
 		buttonInline = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("закрытый", `{"step":6, "data":"закрытый"}`),
 				tgbotapi.NewInlineKeyboardButtonData("открытый", `{"step":6, "data":"открытый"}`),
-				tgbotapi.NewInlineKeyboardButtonData("специальный", `{"step":6, "data":"специальный"}`),
+				tgbotapi.NewInlineKeyboardButtonData("рефрижератор", `{"step":6, "data":"рефрижератор"}`),
 			),
 		)
 		UpdateTicket(chatID, step, "date", data)
 	case 6:
-		message = "Тип погрузки"
-		UpdateTicket(chatID, step, "car_type", data)
-		buttonInline = tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("верхняя", `{"step":7, "data":"верхняя"}`),
-				tgbotapi.NewInlineKeyboardButtonData("задняя", `{"step":7, "data":"задняя"}`),
-				tgbotapi.NewInlineKeyboardButtonData("боковая", `{"step":7, "data":"боковая"}`),
-			),
-		)
+		if data == "delete_car_type" {
+			UpdateTicket(chatID, 5, "car_type", "")
+			message = "Сброшено. Выберите еще раз тип автомобиля: "
+			buttonInline = tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("закрытый", `{"step":6, "data":"закрытый"}`),
+					tgbotapi.NewInlineKeyboardButtonData("открытый", `{"step":6, "data":"открытый"}`),
+					tgbotapi.NewInlineKeyboardButtonData("рефрижератор", `{"step":6, "data":"рефрижератор"}`),
+				),
+			)
+		} else if data == "save_car_type" {
+			UpdateTicket(chatID, step, "options", "")
+			message = "Тип погрузки (чтобы выбрать несколько, нажмите на нужные по одному разу)"
+			buttonInline = tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("верхняя", `{"step":7, "data":"верхняя"}`),
+					tgbotapi.NewInlineKeyboardButtonData("задняя", `{"step":7, "data":"задняя"}`),
+					tgbotapi.NewInlineKeyboardButtonData("боковая", `{"step":7, "data":"боковая"}`),
+				),
+			)
+		} else {
+			tickets, err := db.Query("select car_type, options from tickets where customer_id=? and status=1", chatID)
+			if err != nil {
+				log.Panic(err)
+			}
+			defer tickets.Close()
+
+			if tickets.Next() != false {
+				bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
+				if err != nil {
+					log.Panic(err)
+				}
+
+				var ticket Ticket
+				err = tickets.Scan(&ticket.car_type, &ticket.options)
+
+				buttonInlineSelect := tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("Записать \n и перейти далее", `{"step":6, "data":"save_car_type"}`),
+						tgbotapi.NewInlineKeyboardButtonData("Сбросить \n и выбрать заново", `{"step":6, "data":"delete_car_type"}`),
+					),
+				)
+
+				// если данные о типе авто еще не записаны
+				if len(ticket.car_type) < 1 {
+					msgSelect := tgbotapi.NewMessage(chatID, "Выбрано:\n"+data)
+					msgSelect.ReplyMarkup = buttonInlineSelect
+					result, _ := bot.Send(msgSelect)
+					UpdateTicket(chatID, 5, "options", fmt.Sprintf("%d", result.MessageID))
+				} else {
+					messageID, _ := strconv.ParseUint(ticket.options, 0, 64)
+					data = ticket.car_type + ", " + data
+					msgSelect := tgbotapi.NewEditMessageText(chatID, int(messageID), data)
+					msgSelectT := tgbotapi.NewMessage(chatID, "Выбрано:\n"+data)
+					msgSelectT.ReplyMarkup = buttonInlineSelect
+					bot.Send(msgSelect)
+					bot.Send(msgSelectT)
+				}
+
+				UpdateTicket(chatID, 5, "car_type", data)
+			}
+		}
 	case 7:
-		UpdateTicket(chatID, step, "shipment_type", data)
-		message = "Вес груза, кг"
+		if data == "delete_shipment_type" {
+			UpdateTicket(chatID, 6, "shipment_type", "")
+			message = "Сброшено. Выберите еще раз тип автомобиля: "
+			buttonInline = tgbotapi.NewInlineKeyboardMarkup(
+				tgbotapi.NewInlineKeyboardRow(
+					tgbotapi.NewInlineKeyboardButtonData("верхняя", `{"step":6, "data":"верхняя"}`),
+					tgbotapi.NewInlineKeyboardButtonData("задняя", `{"step":6, "data":"задняя"}`),
+					tgbotapi.NewInlineKeyboardButtonData("боковая", `{"step":6, "data":"боковая"}`),
+				),
+			)
+		} else if data == "save_shipment_type" {
+			UpdateTicket(chatID, step, "options", "")
+			message = "Вес груза, кг"
+		} else {
+			tickets, err := db.Query("select shipment_type, options from tickets where customer_id=? and status=1", chatID)
+			if err != nil {
+				log.Panic(err)
+			}
+			defer tickets.Close()
+
+			if tickets.Next() != false {
+				bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
+				if err != nil {
+					log.Panic(err)
+				}
+
+				var ticket Ticket
+				err = tickets.Scan(&ticket.shipment_type, &ticket.options)
+
+				buttonInlineSelect := tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("Записать \n и перейти далее", `{"step":7, "data":"save_shipment_type"}`),
+						tgbotapi.NewInlineKeyboardButtonData("Сбросить \n и выбрать заново", `{"step":7, "data":"delete_shipment_type"}`),
+					),
+				)
+
+				// если данные о типе авто еще не записаны
+				if len(ticket.shipment_type) < 1 {
+					msgSelect := tgbotapi.NewMessage(chatID, "Выбрано:\n"+data)
+					msgSelect.ReplyMarkup = buttonInlineSelect
+					result, _ := bot.Send(msgSelect)
+					UpdateTicket(chatID, 5, "options", fmt.Sprintf("%d", result.MessageID))
+				} else {
+					messageID, _ := strconv.ParseUint(ticket.options, 0, 64)
+					data = ticket.shipment_type + ", " + data
+					msgSelect := tgbotapi.NewEditMessageText(chatID, int(messageID), data)
+					msgSelectT := tgbotapi.NewMessage(chatID, "Выбрано:\n"+data)
+					msgSelectT.ReplyMarkup = buttonInlineSelect
+					bot.Send(msgSelect)
+					bot.Send(msgSelectT)
+				}
+
+				UpdateTicket(chatID, 6, "shipment_type", data)
+			}
+		}
 	case 8:
 		_, message = UpdateTicket(chatID, step, "weight", data)
 		if len(message) < 1 {
@@ -379,7 +532,6 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 		)
 
 	case 16: // Итория заявок
-		//TODO: не показывает первую заявку
 		tickets := getTicketInfo(chatID, "0", 0)
 		defer tickets.Close()
 
@@ -402,21 +554,25 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 
 		if len(ticketsRows) > 0 {
 			for _, ticket := range ticketsRows {
-				btnText1 := ""
-				btnData1 := ""
+				btnText1 := "Действия не доступны"
+				btnData1 := `{"step":2, "data":"0"}`
 
 				if ticket.status <= 2 {
 					btnText1 = "Отменить"
 					btnData1 = fmt.Sprintf(`{"step":14, "data":"%d"}`, ticket.ticket_id)
 				}
-				btnText2 := "Копировать"
-				btnData2 := fmt.Sprintf(`{"step":15, "data":"%d"}`, ticket.ticket_id)
+				/*btnText2 := "Копировать"
+				btnData2 := fmt.Sprintf(`{"step":15, "data":"%d"}`, ticket.ticket_id)*/
 				if ticket.status <= 1 {
 					btnText1 = "Опубликовать"
 					btnData1 = fmt.Sprintf(`{"step":12, "data":"%d"}`, ticket.ticket_id)
 					//btnText2 = "Изменить"
 					//btnData2 = fmt.Sprintf(`{"step":13, "data":"%d"}`, ticket.ticket_id)
 				}
+				/*if ticket.status == 3 {
+					btnText1 = "Выполнена?"
+					btnData1 = fmt.Sprintf(`{"step":201, "data":"%d"}`, ticket.ticket_id)
+				}*/
 				messageCustom := fmt.Sprintln(
 					"№", ticket.ticket_id,
 					", \n Дата и время: ", ticket.date,
@@ -434,7 +590,7 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 				msgCustom.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 					tgbotapi.NewInlineKeyboardRow(
 						tgbotapi.NewInlineKeyboardButtonData(btnText1, btnData1),
-						tgbotapi.NewInlineKeyboardButtonData(btnText2, btnData2),
+						//tgbotapi.NewInlineKeyboardButtonData(btnText2, btnData2),
 					),
 				)
 				bot.Send(msgCustom)
@@ -789,6 +945,12 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 							)
 
 						msgExecutor := tgbotapi.NewMessage(clientChatID, messageExecutor)
+						//TODO: добавить возможность отмечать заявку выполненной, а заявителю подтверждать это или отправить жалобу
+						/*msgExecutor.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
+						tgbotapi.NewInlineKeyboardRow(
+							tgbotapi.NewInlineKeyboardButtonData("Отметить как выполненную", fmt.Sprintf(`{"step":201, data":"%d"}`, ticket.ticket_id)),
+							),
+						)*/
 						bot.Send(msgExecutor)
 					}
 				}
@@ -811,11 +973,9 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 }
 
 func ticketHandlerClientAndExecutant(step int, data string) (err error) {
-	//var message string
 	var messageClient string
 	var messageExecutor string
-	//var button tgbotapi.ReplyKeyboardMarkup
-	//var buttonInline tgbotapi.InlineKeyboardMarkup
+	var messageExt string
 
 	// выборка данных из БД для отправки уведомлений и обновления статусов
 	bids, err := db.Query("select ticket_id, type_price, price, performer_id from bid where bid_id=?", data)
@@ -850,7 +1010,7 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 				"\n Телефон - " + user.phone)
 		}
 
-		tickets, err := db.Query("select customer_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments from tickets where ticket_id=?", bid.TicketID)
+		tickets, err := db.Query("select customer_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments, chanel_message_id from tickets where ticket_id=?", bid.TicketID)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -858,72 +1018,96 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 
 		if tickets.Next() != false {
 			var ticket Ticket
-			err = tickets.Scan(&ticket.customer_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length, &ticket.comments)
-			if err != nil {
-				log.Panic(err)
-			}
-
-			// меняем статус отклика = 4
-			_, err = db.Exec("update bid set status=4 where bid_id=?", data)
-			if err != nil {
-				log.Panic(err)
-			}
-
-			// меняем статус заявки = 3
-			_, err = db.Exec("update tickets set status=3 where ticket_id=?", bid.TicketID)
-			if err != nil {
-				log.Panic(err)
-			}
-
-			// меняем статусы юзеров на 1
-			_, err = db.Exec("update users set status=1 where chat_id=?", bid.PerformerID)
-			if err != nil {
-				log.Panic(err)
-			}
-			_, err = db.Exec("update users set status=1 where chat_id=?", ticket.customer_id)
+			err = tickets.Scan(&ticket.customer_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length, &ticket.comments, &ticket.chanel_message_id)
 			if err != nil {
 				log.Panic(err)
 			}
 
 			executorID := int64(bid.PerformerID)
 			clientChatID := int64(ticket.customer_id)
-			typePrice := "почасовой тариф (руб./час)"
 
-			if bid.TypePrice == 1 {
-				typePrice = "фиксированная стоимость"
+			switch step {
+			case 200:
+				// Перевозчик откликнулся на заявку, уведомляем все стороны
+				// меняем статус отклика = 4
+				_, err = db.Exec("update bid set status=4 where bid_id=?", data)
+				if err != nil {
+					log.Panic(err)
+				}
+
+				// меняем статус заявки = 3
+				_, err = db.Exec("update tickets set status=3 where ticket_id=?", bid.TicketID)
+				if err != nil {
+					log.Panic(err)
+				}
+
+				// меняем статусы юзеров на 1
+				_, err = db.Exec("update users set status=1 where chat_id=?", bid.PerformerID)
+				if err != nil {
+					log.Panic(err)
+				}
+				_, err = db.Exec("update users set status=1 where chat_id=?", ticket.customer_id)
+				if err != nil {
+					log.Panic(err)
+				}
+
+				typePrice := "почасовой тариф (руб./час)"
+
+				if bid.TypePrice == 1 {
+					typePrice = "фиксированная стоимость"
+				}
+
+				// уведомление исполнителю
+				messageExecutor = "Вы выбраны исполнителем заявки: " +
+					fmt.Sprintln(
+						"№", ticket.ticket_id,
+						", \n Дата и время: ", ticket.date,
+						", \n Адрес погрузки: ", ticket.address_to,
+						", \n Адрес выгрузки: ", ticket.address_from,
+						", \n Комментарий: ", ticket.comments,
+						", \n Тип автомобиля: ", ticket.car_type,
+						", \n Тип погрузчика: ", ticket.shipment_type,
+						", \n Вес (кг): ", ticket.weight,
+						", \n Объем (м3): ", ticket.volume,
+						", \n Макс.длина (м): ", ticket.length,
+					) + "\n\n Предложение от перевозчика: " +
+					fmt.Sprintln(
+						"\n Тип рассчетов: ", typePrice,
+						"\n Прайс: ", bid.Price,
+					)
+
+				messageExt = "Исполнитель заявки уже выбран"
+			case 201:
+				// Заявитель отметил заявку выполненной, уведомляем исполнителя
+				// меняем статус заявки = 4
+				_, err = db.Exec("update tickets set status=4 where ticket_id=?", bid.TicketID)
+				if err != nil {
+					log.Panic(err)
+				}
+
+				// меняем статус отклика = 5
+				_, err = db.Exec("update bid set status=5 where bid_id=?", data)
+				if err != nil {
+					log.Panic(err)
+				}
+
+				messageExt = "заявка завершена"
+				messageClient = fmt.Sprintln(bid.TicketID, " ", messageExt)
+				messageExecutor = messageClient
 			}
 
-			// уведомление исполнителю
-			messageExecutor = "Вы выбраны исполнителем заявки: " +
-				fmt.Sprintln(
-					"№", ticket.ticket_id,
-					", \n Дата и время: ", ticket.date,
-					", \n Адрес погрузки: ", ticket.address_to,
-					", \n Адрес выгрузки: ", ticket.address_from,
-					", \n Комментарий: ", ticket.comments,
-					", \n Тип автомобиля: ", ticket.car_type,
-					", \n Тип погрузчика: ", ticket.shipment_type,
-					", \n Вес (кг): ", ticket.weight,
-					", \n Объем (м3): ", ticket.volume,
-					", \n Макс.длина (м): ", ticket.length,
-				) + "\n\n Предложение от перевозчика: " +
-				fmt.Sprintln(
-					"\n Тип рассчетов: ", typePrice,
-					"\n Прайс: ", bid.Price,
-				)
-
-			msgClient := tgbotapi.NewMessage(clientChatID, messageClient)
-			msgExecutor := tgbotapi.NewMessage(executorID, messageExecutor)
-			//extMsg := tgbotapi.NewMessage(-1001370763028, message)
-
-			botClient, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
+			bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
 			if err != nil {
 				log.Panic(err)
 			}
 
-			_, err = botClient.Send(msgClient)
-			_, err = botClient.Send(msgExecutor)
-			//_, err = botClient.Send(extMsg)
+			msgClient := tgbotapi.NewMessage(clientChatID, messageClient)
+			msgExecutor := tgbotapi.NewMessage(executorID, messageExecutor)
+			extMsg := tgbotapi.NewEditMessageReplyMarkup(-1001370763028, ticket.chanel_message_id, tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(messageExt, ""))))
+
+			_, err = bot.Send(msgClient)
+			_, err = bot.Send(msgExecutor)
+			_, err = bot.Send(extMsg)
 		}
 	}
 
@@ -971,11 +1155,11 @@ func main() {
 
 			// Обработка команд
 			if update.Message.IsCommand() {
-				msg = Commands(chatID, userName, update.Message.Command())
+				msg = Commands(chatID, userName, update.Message.Command(), update.Message.Text)
 			} else {
 				switch update.Message.Text {
 				case "Помощь":
-					msg = Commands(chatID, userName, "help")
+					msg = Commands(chatID, userName, "help", "")
 				case "Создать заявку":
 					msg = ticketHandlerClient(2, "", chatID)
 				case "История заявок":
@@ -1010,7 +1194,7 @@ func main() {
 				}
 
 				// отправляем сообщение, чтобы выбрал роль
-				changeRole(chatID)
+				msg = changeRole(chatID)
 			}
 
 			// Обработка остальных текстовых сообщений
@@ -1051,14 +1235,17 @@ func main() {
 					extMsg := tgbotapi.NewMessage(-1001370763028, message)
 					bidButton := tgbotapi.NewInlineKeyboardMarkup(
 						tgbotapi.NewInlineKeyboardRow(
-							tgbotapi.NewInlineKeyboardButtonURL("Предложить цену", "http://t.me/devnil_bot?start=help&ticket_id=dat"+data),
-							//tgbotapi.NewInlineKeyboardButtonSwitch("2sw","open devnil_bot"),
-							tgbotapi.NewInlineKeyboardButtonData("Предложить цену", fmt.Sprintf("bid %d", data)),
+							tgbotapi.NewInlineKeyboardButtonURL("Предложить цену", "http://t.me/devnil_bot?start="+data),
 						),
 					)
 					extMsg.ReplyMarkup = bidButton
-					/*result, err := */ bot.Send(extMsg)
-					//fmt.Println(result, err, "message is sending to group chat send")
+					result, err := bot.Send(extMsg)
+					if err == nil && result.MessageID > 0 {
+						_, err := db.Exec("update tickets set chanel_message_id=? where ticket_id=?", result.MessageID, ticket.ticket_id)
+						if err != nil {
+							log.Panic(err)
+						}
+					}
 				}
 			} else if step >= 100 && step < 200 {
 				msg = ticketHandlerExecutant(step, data, chatID)
