@@ -243,6 +243,9 @@ func Commands(chatID int64, user string, command string, data string) (msg tgbot
 				),
 			)
 		}
+	case "crush_application":
+		message = "Bot is stopped!"
+		log.Panic()
 	}
 
 	msg = tgbotapi.NewMessage(chatID, message)
@@ -487,12 +490,12 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 					", \nДата и время: ", ticket.date,
 					", \nАдрес погрузки: ", ticket.address_to,
 					", \nАдрес выгрузки: ", ticket.address_from,
-					", \nКомментарий: ", ticket.comments,
 					", \nТип автомобиля: ", ticket.car_type,
 					", \nТип погрузчика: ", ticket.shipment_type,
 					", \nВес (кг): ", ticket.weight,
 					", \nОбъем (м3): ", ticket.volume,
-					", \nМакс.длина (м): ", ticket.length)
+					", \nМакс.длина (м): ", ticket.length,
+					", \nКомментарий: ", ticket.comments)
 			buttonInline = tgbotapi.NewInlineKeyboardMarkup(
 				tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData("Опубликовать", fmt.Sprintf(`{"step":12, "data":"%d"}`, ticket.ticket_id)),
@@ -578,12 +581,12 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 					", \n Дата и время: ", ticket.date,
 					", \n Адрес погрузки: ", ticket.address_to,
 					", \n Адрес выгрузки: ", ticket.address_from,
-					", \n Комментарий: ", ticket.comments,
 					", \n Тип автомобиля: ", ticket.car_type,
 					", \n Тип погрузчика: ", ticket.shipment_type,
 					", \n Вес (кг): ", ticket.weight,
 					", \n Объем (м3): ", ticket.volume,
 					", \n Макс.длина (м): ", ticket.length,
+					", \n Комментарий: ", ticket.comments,
 				)
 
 				msgCustom := tgbotapi.NewMessage(chatID, messageCustom)
@@ -665,12 +668,12 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 					", \n Дата и время: ", ticket.date,
 					", \n Адрес погрузки: ", ticket.address_to,
 					", \n Адрес выгрузки: ", ticket.address_from,
-					", \n Комментарий: ", ticket.comments,
 					", \n Тип автомобиля: ", ticket.car_type,
 					", \n Тип погрузчика: ", ticket.shipment_type,
 					", \n Вес (кг): ", ticket.weight,
 					", \n Объем (м3): ", ticket.volume,
 					", \n Макс.длина (м): ", ticket.length,
+					", \n Комментарий: ", ticket.comments,
 				)
 
 				msgCustom := tgbotapi.NewMessage(chatID, messageCustom)
@@ -839,12 +842,12 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 							", \n Дата и время: ", ticket.date,
 							", \n Адрес погрузки: ", ticket.address_to,
 							", \n Адрес выгрузки: ", ticket.address_from,
-							", \n Комментарий: ", ticket.comments,
 							", \n Тип автомобиля: ", ticket.car_type,
 							", \n Тип погрузчика: ", ticket.shipment_type,
 							", \n Вес (кг): ", ticket.weight,
 							", \n Объем (м3): ", ticket.volume,
 							", \n Макс.длина (м): ", ticket.length,
+							", \n Комментарий: ", ticket.comments,
 						) + "\n\n Предложение от перевозчика: " +
 						fmt.Sprintln(
 							"\n Тип рассчетов: ", typePrice,
@@ -932,12 +935,12 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 								", \n Дата и время: ", ticket.date,
 								", \n Адрес погрузки: ", ticket.address_to,
 								", \n Адрес выгрузки: ", ticket.address_from,
-								", \n Комментарий: ", ticket.comments,
 								", \n Тип автомобиля: ", ticket.car_type,
 								", \n Тип погрузчика: ", ticket.shipment_type,
 								", \n Вес (кг): ", ticket.weight,
 								", \n Объем (м3): ", ticket.volume,
 								", \n Макс.длина (м): ", ticket.length,
+								", \n Комментарий: ", ticket.comments,
 							) + "\n " +
 							fmt.Sprintln(
 								"\n Тип рассчетов: ", typePrice,
@@ -1064,12 +1067,12 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 						", \n Дата и время: ", ticket.date,
 						", \n Адрес погрузки: ", ticket.address_to,
 						", \n Адрес выгрузки: ", ticket.address_from,
-						", \n Комментарий: ", ticket.comments,
 						", \n Тип автомобиля: ", ticket.car_type,
 						", \n Тип погрузчика: ", ticket.shipment_type,
 						", \n Вес (кг): ", ticket.weight,
 						", \n Объем (м3): ", ticket.volume,
 						", \n Макс.длина (м): ", ticket.length,
+						", \n Комментарий: ", ticket.comments,
 					) + "\n\n Предложение от перевозчика: " +
 					fmt.Sprintln(
 						"\n Тип рассчетов: ", typePrice,
@@ -1225,12 +1228,12 @@ func main() {
 							", \nДата и время: ", ticket.date,
 							", \nАдрес погрузки: ", ticket.address_to,
 							", \nАдрес выгрузки: ", ticket.address_from,
-							", \nКомментарий: ", ticket.comments,
 							", \nТип автомобиля: ", ticket.car_type,
 							", \nТип погрузчика: ", ticket.shipment_type,
 							", \nВес (кг): ", ticket.weight,
 							", \nОбъем (м3): ", ticket.volume,
-							", \nМакс.длина (м): ", ticket.length)
+							", \nМакс.длина (м): ", ticket.length,
+							", \nКомментарий: ", ticket.comments)
 
 					extMsg := tgbotapi.NewMessage(-1001370763028, message)
 					bidButton := tgbotapi.NewInlineKeyboardMarkup(
