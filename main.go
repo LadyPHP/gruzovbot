@@ -244,7 +244,6 @@ func Commands(chatID int64, user string, command string, data string) (msg tgbot
 			)
 		}
 	case "crush_application":
-		message = "Bot is stopped!"
 		log.Panic()
 	}
 
@@ -325,134 +324,14 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 		message = "Дата и время погрузки"
 		UpdateTicket(chatID, step, "address_from", data)
 	case 5:
-		message = "Тип автомобиля (чтобы выбрать несколько, нажмите на нужные по одному разу)"
-		buttonInline = tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("закрытый", `{"step":6, "data":"закрытый"}`),
-				tgbotapi.NewInlineKeyboardButtonData("открытый", `{"step":6, "data":"открытый"}`),
-				tgbotapi.NewInlineKeyboardButtonData("рефрижератор", `{"step":6, "data":"рефрижератор"}`),
-			),
-		)
+		message = "Тип автомобиля (открытый, закрытый, рефрижератор и т.п.)"
 		UpdateTicket(chatID, step, "date", data)
 	case 6:
-		if data == "delete_car_type" {
-			UpdateTicket(chatID, 5, "car_type", "")
-			message = "Сброшено. Выберите еще раз тип автомобиля: "
-			buttonInline = tgbotapi.NewInlineKeyboardMarkup(
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("закрытый", `{"step":6, "data":"закрытый"}`),
-					tgbotapi.NewInlineKeyboardButtonData("открытый", `{"step":6, "data":"открытый"}`),
-					tgbotapi.NewInlineKeyboardButtonData("рефрижератор", `{"step":6, "data":"рефрижератор"}`),
-				),
-			)
-		} else if data == "save_car_type" {
-			UpdateTicket(chatID, step, "options", "")
-			message = "Тип погрузки (чтобы выбрать несколько, нажмите на нужные по одному разу)"
-			buttonInline = tgbotapi.NewInlineKeyboardMarkup(
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("верхняя", `{"step":7, "data":"верхняя"}`),
-					tgbotapi.NewInlineKeyboardButtonData("задняя", `{"step":7, "data":"задняя"}`),
-					tgbotapi.NewInlineKeyboardButtonData("боковая", `{"step":7, "data":"боковая"}`),
-				),
-			)
-		} else {
-			tickets, err := db.Query("select car_type, options from tickets where customer_id=? and status=1", chatID)
-			if err != nil {
-				log.Panic(err)
-			}
-			defer tickets.Close()
-
-			if tickets.Next() != false {
-				bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
-				if err != nil {
-					log.Panic(err)
-				}
-
-				var ticket Ticket
-				err = tickets.Scan(&ticket.car_type, &ticket.options)
-
-				buttonInlineSelect := tgbotapi.NewInlineKeyboardMarkup(
-					tgbotapi.NewInlineKeyboardRow(
-						tgbotapi.NewInlineKeyboardButtonData("Записать \n и перейти далее", `{"step":6, "data":"save_car_type"}`),
-						tgbotapi.NewInlineKeyboardButtonData("Сбросить \n и выбрать заново", `{"step":6, "data":"delete_car_type"}`),
-					),
-				)
-
-				// если данные о типе авто еще не записаны
-				if len(ticket.car_type) < 1 {
-					msgSelect := tgbotapi.NewMessage(chatID, "Выбрано:\n"+data)
-					msgSelect.ReplyMarkup = buttonInlineSelect
-					result, _ := bot.Send(msgSelect)
-					UpdateTicket(chatID, 5, "options", fmt.Sprintf("%d", result.MessageID))
-				} else {
-					messageID, _ := strconv.ParseUint(ticket.options, 0, 64)
-					data = ticket.car_type + ", " + data
-					msgSelect := tgbotapi.NewEditMessageText(chatID, int(messageID), data)
-					msgSelectT := tgbotapi.NewMessage(chatID, "Выбрано:\n"+data)
-					msgSelectT.ReplyMarkup = buttonInlineSelect
-					bot.Send(msgSelect)
-					bot.Send(msgSelectT)
-				}
-
-				UpdateTicket(chatID, 5, "car_type", data)
-			}
-		}
+		message = "Тип погрузки (верхняя, задняя, боковая и т.п.)"
+		UpdateTicket(chatID, step, "car_type", data)
 	case 7:
-		if data == "delete_shipment_type" {
-			UpdateTicket(chatID, 6, "shipment_type", "")
-			message = "Сброшено. Выберите еще раз тип автомобиля: "
-			buttonInline = tgbotapi.NewInlineKeyboardMarkup(
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("верхняя", `{"step":6, "data":"верхняя"}`),
-					tgbotapi.NewInlineKeyboardButtonData("задняя", `{"step":6, "data":"задняя"}`),
-					tgbotapi.NewInlineKeyboardButtonData("боковая", `{"step":6, "data":"боковая"}`),
-				),
-			)
-		} else if data == "save_shipment_type" {
-			UpdateTicket(chatID, step, "options", "")
-			message = "Вес груза, кг"
-		} else {
-			tickets, err := db.Query("select shipment_type, options from tickets where customer_id=? and status=1", chatID)
-			if err != nil {
-				log.Panic(err)
-			}
-			defer tickets.Close()
-
-			if tickets.Next() != false {
-				bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
-				if err != nil {
-					log.Panic(err)
-				}
-
-				var ticket Ticket
-				err = tickets.Scan(&ticket.shipment_type, &ticket.options)
-
-				buttonInlineSelect := tgbotapi.NewInlineKeyboardMarkup(
-					tgbotapi.NewInlineKeyboardRow(
-						tgbotapi.NewInlineKeyboardButtonData("Записать \n и перейти далее", `{"step":7, "data":"save_shipment_type"}`),
-						tgbotapi.NewInlineKeyboardButtonData("Сбросить \n и выбрать заново", `{"step":7, "data":"delete_shipment_type"}`),
-					),
-				)
-
-				// если данные о типе авто еще не записаны
-				if len(ticket.shipment_type) < 1 {
-					msgSelect := tgbotapi.NewMessage(chatID, "Выбрано:\n"+data)
-					msgSelect.ReplyMarkup = buttonInlineSelect
-					result, _ := bot.Send(msgSelect)
-					UpdateTicket(chatID, 5, "options", fmt.Sprintf("%d", result.MessageID))
-				} else {
-					messageID, _ := strconv.ParseUint(ticket.options, 0, 64)
-					data = ticket.shipment_type + ", " + data
-					msgSelect := tgbotapi.NewEditMessageText(chatID, int(messageID), data)
-					msgSelectT := tgbotapi.NewMessage(chatID, "Выбрано:\n"+data)
-					msgSelectT.ReplyMarkup = buttonInlineSelect
-					bot.Send(msgSelect)
-					bot.Send(msgSelectT)
-				}
-
-				UpdateTicket(chatID, 6, "shipment_type", data)
-			}
-		}
+		message = "Вес груза, кг"
+		UpdateTicket(chatID, step, "shipment_type", data)
 	case 8:
 		_, message = UpdateTicket(chatID, step, "weight", data)
 		if len(message) < 1 {
