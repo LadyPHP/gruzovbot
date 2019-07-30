@@ -161,7 +161,7 @@ func getTicketInfo(chatID int64, ticketID string, status int) (tickets *sql.Rows
 	}
 
 	if status == 0 {
-		tickets, err = db.Query("select ticket_id, status, date, address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where customer_id=? order by ticket_id asc", chatID)
+		tickets, err = db.Query("select ticket_id, status, date, address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where customer_id=? and date != '' order by ticket_id asc", chatID)
 	}
 
 	if ticketID != "0" {
@@ -236,7 +236,7 @@ func Commands(chatID int64, user string, command string, data string) (msg tgbot
 				log.Panic(err)
 			}
 
-			message = "Вы уже зарегистрированы как перевозчик. Для продолжения нажмите кнопку."
+			message = fmt.Sprintln("Вы уже зарегистрированы как перевозчик. Для продолжения работы с заявкой ", ticketID, "нажмите кнопку.")
 			buttonInline = tgbotapi.NewInlineKeyboardMarkup(
 				tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData("Предложить цену", fmt.Sprintf(`{"step":102, "data":"%d"}`, ticketID)),
@@ -305,7 +305,9 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 				buttonInline = tgbotapi.NewInlineKeyboardMarkup(
 					tgbotapi.NewInlineKeyboardRow(
 						tgbotapi.NewInlineKeyboardButtonData("Да", fmt.Sprintf(`{"step":2, "data":"%d"}`, ticket.ticket_id)),
-						tgbotapi.NewInlineKeyboardButtonData("Нет, отменить прежнюю.", fmt.Sprintf(`{"step":14, "data":"%d"}`, ticket.ticket_id)),
+					),
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("Нет, отменить прежнюю", fmt.Sprintf(`{"step":14, "data":"%d"}`, ticket.ticket_id)),
 					),
 				)
 			}
@@ -409,7 +411,7 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 		buttonInline = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("Да", fmt.Sprintf(`{"step":2, "data":"%d"}`, InsertTicket)),
-				tgbotapi.NewInlineKeyboardButtonData("Нет, сразу опубликовать.", fmt.Sprintf(`{"step":12, "data":"%d"}`, InsertTicket)),
+				tgbotapi.NewInlineKeyboardButtonData("Нет, сразу опубликовать", fmt.Sprintf(`{"step":12, "data":"%d"}`, InsertTicket)),
 			),
 		)
 
@@ -431,6 +433,7 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 			if err != nil {
 				log.Panic(err)
 			}
+
 			ticketsRows = append(ticketsRows, ticket)
 		}
 
@@ -584,6 +587,8 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 		buttonInlineTmp := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("Почасовой тариф (руб./час)", `{"step":103, "data":"0"}`),
+			),
+			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("Фиксированная стоимость", `{"step":103, "data":"1"}`),
 			),
 		)
@@ -942,7 +947,7 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 				// уведомление исполнителю
 				messageExecutor = "Вы выбраны исполнителем заявки: " +
 					fmt.Sprintln(
-						"№", ticket.ticket_id,
+						"№", bid.TicketID,
 						", \n Дата и время: ", ticket.date,
 						", \n Адрес погрузки: ", ticket.address_to,
 						", \n Адрес выгрузки: ", ticket.address_from,
@@ -958,7 +963,7 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 						"\n Прайс: ", bid.Price,
 					)
 
-				messageExt = "Исполнитель заявки уже выбран"
+				messageExt = "Исполнитель уже выбран"
 			case 201:
 				// Заявитель отметил заявку выполненной, уведомляем исполнителя
 				// меняем статус заявки = 4
@@ -985,7 +990,7 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 
 			msgClient := tgbotapi.NewMessage(clientChatID, messageClient)
 			msgExecutor := tgbotapi.NewMessage(executorID, messageExecutor)
-			extMsg := tgbotapi.NewEditMessageReplyMarkup(-1001370763028, ticket.chanel_message_id, tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(messageExt, ""))))
+			extMsg := tgbotapi.NewEditMessageReplyMarkup(-1001370763028, ticket.chanel_message_id, tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(messageExt, "done"))))
 
 			_, err = bot.Send(msgClient)
 			_, err = bot.Send(msgExecutor)
