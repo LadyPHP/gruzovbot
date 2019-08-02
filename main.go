@@ -6,6 +6,7 @@ import (
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	"gopkg.in/telegram-bot-api.v4"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -16,6 +17,8 @@ import (
 var db *sql.DB
 var configuration Config
 var msg tgbotapi.MessageConfig
+
+//var bot = botImplement()
 
 type Config struct {
 	TelegramBotToken  string
@@ -79,6 +82,15 @@ func ConnectDB() {
 	if err != nil {
 		log.Panic(err)
 	}
+}
+
+func botImplement() (bot *tgbotapi.BotAPI) {
+	bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
+	if err != nil {
+		log.Panic(err)
+	}
+
+	return bot
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +177,7 @@ func getTicketInfo(chatID int64, ticketID string, status int) (tickets *sql.Rows
 	}
 
 	if ticketID != "0" {
-		tickets, err = db.Query("select ticket_id, date, address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where ticket_id=?", ticketID)
+		tickets, err = db.Query("select ticket_id, date, address_to, address_from, comments, car_type, shipment_type, weight, volume, length, chanel_message_id from tickets where ticket_id=?", ticketID)
 	}
 
 	//defer tickets.Close()
@@ -264,6 +276,8 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 	var button tgbotapi.ReplyKeyboardMarkup
 	var buttonInline tgbotapi.InlineKeyboardMarkup
 
+	bot := botImplement()
+
 	switch step {
 	case 1:
 		_, err := db.Exec("update users set status=?, role=0 where chat_id=?", step, chatID)
@@ -275,8 +289,11 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 		button = tgbotapi.NewReplyKeyboard(
 			tgbotapi.NewKeyboardButtonRow(
 				tgbotapi.NewKeyboardButton("Создать заявку"),
-				tgbotapi.NewKeyboardButton("История заявок"),
 				tgbotapi.NewKeyboardButton("Изменить роль"),
+			),
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("История заявок"),
+				tgbotapi.NewKeyboardButton("Скачать отчет (заказчик)"),
 			),
 		)
 	case 2:
@@ -399,6 +416,18 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 			log.Panic(err)
 		}
 		message = "Заявка отменена."
+
+		tickets := getTicketInfo(chatID, data, 0)
+		defer tickets.Close()
+
+		ticket := new(Ticket)
+		err = tickets.Scan(&ticket.ticket_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length, &ticket.chanel_message_id)
+		if err != nil {
+			log.Panic(err)
+		}
+
+		extMsg := tgbotapi.NewEditMessageReplyMarkup(-1001370763028, ticket.chanel_message_id, tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData("Заявка отменена", "cancel"))))
+		bot.Send(extMsg)
 	case 15:
 		//TODO: копировать заявку - допоилить редактирование некоторых параметров (а не всех по цепочке)
 		//TODO: проверить, что скопированная заявка меняет только свои данные (а не все, у которых status = 1)
@@ -419,17 +448,12 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 		tickets := getTicketInfo(chatID, "0", 0)
 		defer tickets.Close()
 
-		bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
-		if err != nil {
-			log.Panic(err)
-		}
-
 		ticketsRows := make([]*Ticket, 0)
 
 		for tickets.Next() {
 			// если есть ранее созданные заказчиком заказы, выводим сообщением со ссылками
 			ticket := new(Ticket)
-			err = tickets.Scan(&ticket.ticket_id, &ticket.status, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length)
+			err := tickets.Scan(&ticket.ticket_id, &ticket.status, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length)
 			if err != nil {
 				log.Panic(err)
 			}
@@ -488,6 +512,9 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 		} else {
 			message = "Вы пока не создали ниодной заявки. \n Чтобы начать, нажмите кнопку \"Создать новую\" в меню."
 		}
+
+	case 17:
+
 	}
 
 	msg = tgbotapi.NewMessage(chatID, message)
@@ -507,6 +534,8 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 	var button tgbotapi.ReplyKeyboardMarkup
 	var buttonInline tgbotapi.InlineKeyboardMarkup
 
+	bot := botImplement()
+
 	switch step {
 	case 100:
 		_, err := db.Exec("update users set status=?, role=1 where chat_id=?", step, chatID)
@@ -518,25 +547,23 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 		button = tgbotapi.NewReplyKeyboard(
 			tgbotapi.NewKeyboardButtonRow(
 				tgbotapi.NewKeyboardButton("Все новые заявки"),
-				tgbotapi.NewKeyboardButton("Исполняемые мной"),
 				tgbotapi.NewKeyboardButton("Изменить роль"),
+			),
+			tgbotapi.NewKeyboardButtonRow(
+				tgbotapi.NewKeyboardButton("Исполняемые мной"),
+				tgbotapi.NewKeyboardButton("Скачать отчет (перевозчик)"),
 			),
 		)
 	case 101:
 		tickets := getTicketInfo(chatID, data, 2)
 		defer tickets.Close()
 
-		bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
-		if err != nil {
-			log.Panic(err)
-		}
-
 		ticketsRows := make([]*Ticket, 0)
 
 		for tickets.Next() {
 			// если есть ранее созданные заказчиком заказы, выводим сообщением со ссылками
 			ticket := new(Ticket)
-			err = tickets.Scan(&ticket.ticket_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length)
+			err := tickets.Scan(&ticket.ticket_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length)
 			if err != nil {
 				log.Panic(err)
 			}
@@ -611,7 +638,8 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 				log.Panic(err)
 			}
 
-			// если уже проставлены значения (status = 1)
+			// если уже проставлены значения (status = 2)
+			//TODO: пофиксить возможность повторной отправки отклика в зависимости от статуса
 			if bid.Status == 2 {
 				typePrice := "почасовой тариф (руб./час)"
 
@@ -624,7 +652,7 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 					"\n Стоимость - " + bid.Price +
 					"\n Если хотите обновить данные, то для продолжения выберите тип рассчета: "
 				buttonInline = buttonInlineTmp
-			} else if bid.Status > 2 {
+			} else if bid.Status > 2 && bid.Status < 7 {
 				message = "Ваш отклик уже был отправлен заказчику ранее. На этом этапе информацию изменить нельзя. Дождитесь, когда заказчик свяжется с Вами."
 			} else if bid.Status < 2 {
 				_, err := db.Exec("update bid set status=0 where performer_id=? and bid_id=?", chatID, bid.BidID)
@@ -633,7 +661,10 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 				}
 
 				buttonInline = buttonInlineTmp
-			}
+			} /* else if bid.Status == 7 {
+				message = "Вы ранее отменили запрос на эту заявку. Если хотите его возобновить, то для продолжения выберите тип рассчета: "
+				buttonInline = buttonInlineTmp
+			}*/
 		}
 
 		_, err = db.Exec("update users set status=? where chat_id=?", step+1, chatID)
@@ -690,11 +721,6 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 			defer bids.Close()
 
 			if bids.Next() != false {
-				bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
-				if err != nil {
-					log.Panic(err)
-				}
-
 				var bid Bid
 				err = bids.Scan(&bid.TicketID, &bid.TypePrice, &bid.Price, &bid.BidID)
 				if err != nil {
@@ -759,12 +785,7 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 		}
 
 	case 106:
-		bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
-		if err != nil {
-			log.Panic(err)
-		}
-
-		_, err = db.Exec("update users set status=? where chat_id=?", step+1, chatID)
+		_, err := db.Exec("update users set status=? where chat_id=?", step+1, chatID)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -845,6 +866,122 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 		} else {
 			message = "У Вас еще нет подтвержденных заявок на исполнении."
 		}
+
+	case 107:
+		message = "Укажите дату начала периода для выгрузки (например, 12.06.2019)"
+		_, err := db.Exec("update users set status=108 where chat_id=?", chatID)
+		if err != nil {
+			log.Panic(err)
+		}
+	case 108:
+		message = "Укажите дату конца периода для выгрузки (например, 30.06.2019)"
+		pathName := fmt.Sprintln("reports/", chatID)
+		os.RemoveAll(pathName)
+		os.Mkdir(pathName, 0775)
+		reportFile, err := os.Create(pathName + "/" + data)
+		if err != nil {
+			log.Panic(err)
+			os.Exit(1)
+		}
+		defer reportFile.Close()
+
+		_, err = db.Exec("update users set status=109 where chat_id=?", chatID)
+		if err != nil {
+			log.Panic(err)
+		}
+	case 109:
+		pathName := fmt.Sprintln("reports/", chatID)
+		files, err := ioutil.ReadDir(pathName)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		for _, file := range files {
+			dateStart := file.Name()
+			fileName := dateStart + "_" + data + ".csv"
+			err = os.Rename(pathName+"/"+file.Name(), pathName+"/"+fileName)
+
+			if err == nil {
+				fileOpen, err := os.OpenFile(pathName+"/"+fileName, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+				if err != nil {
+					log.Panic(err)
+					os.Exit(1)
+				}
+				defer fileOpen.Close()
+
+				_, err = fileOpen.WriteString("№;Дата и время;Адрес погрузки;Адрес выгрузки;Тип автомобиля;Тип погрузчика;Вес (кг);Объем (м3);Макс.длина (м);Комментарий;Тип рассчетов;Прайс\n")
+				if err != nil {
+					log.Panic(err)
+				}
+
+				bids, err := db.Query("select ticket_id, type_price, price, bid_id from bid where status=4 and performer_id=?", chatID)
+				if err != nil {
+					log.Panic(err)
+				}
+				defer bids.Close()
+
+				bidsRows := make([]*Bid, 0)
+
+				for bids.Next() {
+					bid := new(Bid)
+					err = bids.Scan(&bid.TicketID, &bid.TypePrice, &bid.Price, &bid.BidID)
+					if err != nil {
+						log.Panic(err)
+					}
+					bidsRows = append(bidsRows, bid)
+				}
+
+				if len(bidsRows) > 0 {
+					for _, bid := range bidsRows {
+						tickets, err := db.Query("select customer_id, ticket_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments from tickets where ticket_id=?", bid.TicketID)
+						if err != nil {
+							log.Panic(err)
+						}
+						defer tickets.Close()
+
+						ticketsRows := make([]*Ticket, 0)
+
+						for tickets.Next() {
+							ticket := new(Ticket)
+							err = tickets.Scan(&ticket.customer_id, &ticket.ticket_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length, &ticket.comments)
+							if err != nil {
+								log.Panic(err)
+							}
+							ticketsRows = append(ticketsRows, ticket)
+						}
+
+						if len(ticketsRows) > 0 {
+							for _, ticket := range ticketsRows {
+								typePrice := "почасовой тариф (руб./час)"
+
+								if bid.TypePrice == 1 {
+									typePrice = "фиксированная стоимость"
+								}
+								item := fmt.Sprintln(
+									ticket.ticket_id,
+									";", ticket.date,
+									";", ticket.address_to,
+									";", ticket.address_from,
+									";", ticket.car_type,
+									";", ticket.shipment_type,
+									";", ticket.weight,
+									";", ticket.volume,
+									";", ticket.length,
+									";", ticket.comments,
+									";", typePrice,
+									";", bid.Price,
+								)
+
+								fileOpen.WriteString(item)
+							}
+						}
+					}
+				}
+			}
+			message = "Отчет сформирован."
+			msgFile := tgbotapi.NewDocumentUpload(chatID, pathName+"/"+fileName)
+			bot.Send(msgFile)
+		}
 	}
 
 	msg = tgbotapi.NewMessage(chatID, message)
@@ -863,6 +1000,8 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 	var messageClient string
 	var messageExecutor string
 	var messageExt string
+
+	bot := botImplement()
 
 	// выборка данных из БД для отправки уведомлений и обновления статусов
 	bids, err := db.Query("select ticket_id, type_price, price, performer_id from bid where bid_id=?", data)
@@ -983,11 +1122,6 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 				messageExecutor = messageClient
 			}
 
-			bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
-			if err != nil {
-				log.Panic(err)
-			}
-
 			msgClient := tgbotapi.NewMessage(clientChatID, messageClient)
 			msgExecutor := tgbotapi.NewMessage(executorID, messageExecutor)
 			extMsg := tgbotapi.NewEditMessageReplyMarkup(-1001370763028, ticket.chanel_message_id, tgbotapi.NewInlineKeyboardMarkup(tgbotapi.NewInlineKeyboardRow(tgbotapi.NewInlineKeyboardButtonData(messageExt, "done"))))
@@ -1006,11 +1140,7 @@ func main() {
 	ConnectDB() // подключение к БД
 
 	// Oбработчик запросов от telegram API
-	bot, err := tgbotapi.NewBotAPI(configuration.TelegramBotToken)
-	if err != nil {
-		log.Panic(err)
-	}
-
+	bot := botImplement()
 	bot.Debug = configuration.TelegramDebugMode
 	if bot.Debug == true {
 		log.Printf("Authorized on account %s", bot.Self.UserName)
@@ -1022,11 +1152,7 @@ func main() {
 	// тип взаимодействия с API (переключается в config.json: "TelegramAPIMode" : "channel" или "webhook")
 	updates := bot.ListenForWebhook("/" + bot.Token)
 	if configuration.TelegramAPIMode == "channel" {
-		updates, err = bot.GetUpdatesChan(u)
-	}
-
-	if err != nil {
-		log.Panic(err)
+		updates, _ = bot.GetUpdatesChan(u)
 	}
 
 	http.HandleFunc("/", handler)
@@ -1051,12 +1177,16 @@ func main() {
 					msg = ticketHandlerClient(2, "", chatID)
 				case "История заявок":
 					msg = ticketHandlerClient(16, "", chatID)
+				case "Скачать отчет (заказчик)":
+					msg = ticketHandlerClient(17, "", chatID)
 				case "Изменить роль":
 					msg = changeRole(chatID)
 				case "Все новые заявки":
 					msg = ticketHandlerExecutant(101, "0", chatID)
 				case "Исполняемые мной":
 					msg = ticketHandlerExecutant(106, "0", chatID)
+				case "Скачать отчет (перевозчик)":
+					msg = ticketHandlerExecutant(107, "", chatID)
 				default:
 					step := getStep(chatID)
 					if step < 100 {
@@ -1103,7 +1233,7 @@ func main() {
 					defer tickets.Close()
 
 					ticket := new(Ticket)
-					err = tickets.Scan(&ticket.ticket_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length)
+					err := tickets.Scan(&ticket.ticket_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.comments, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length, &ticket.chanel_message_id)
 					if err != nil {
 						log.Panic(err)
 					}
@@ -1137,7 +1267,7 @@ func main() {
 			} else if step >= 100 && step < 200 {
 				msg = ticketHandlerExecutant(step, data, chatID)
 			} else {
-				err = ticketHandlerClientAndExecutant(step, data)
+				err := ticketHandlerClientAndExecutant(step, data)
 				if err != nil {
 					log.Panic(err)
 				}
