@@ -12,6 +12,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var db *sql.DB
@@ -97,17 +98,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "Application started.")
 }
 
-func CheckUser(chatID int64) bool {
-	users, err := db.Query("select * from users where chat_id=?", chatID)
-	if err != nil {
-		log.Panic(err)
-	}
-	defer users.Close()
-
-	return users.Next()
-}
-
 func getStep(chatID int64) (step int) {
+	step = -1
 	users, err := db.Query("select status from users where chat_id=?", chatID)
 	if err != nil {
 		log.Panic(err)
@@ -123,7 +115,7 @@ func getStep(chatID int64) (step int) {
 		step = user.status
 	}
 
-	return step
+	return
 }
 
 func changeRole(chatID int64) (msg tgbotapi.MessageConfig) {
@@ -144,6 +136,16 @@ func UpdateTicket(chatID int64, step int, field string, value string) (bool, str
 		updValue, err := strconv.ParseFloat(value, 64)
 		if err != nil {
 			return false, "Не удалось записать ответ. Введите число. Другие символы не допустимы. Если точное значение не известно, то укажите приблизительное. А далее можно будет оставить комментарий для исполнителя (я далее отдельно это предложу сделать)."
+		}
+		_, err = db.Exec("update tickets set "+field+"=? where customer_id=? and status=1", updValue, chatID)
+		if err != nil {
+			log.Panic(err)
+		}
+	} else if field == "date" {
+		layout := "2006-01-02 15:04"
+		updValue, err := time.Parse(layout, value)
+		if err != nil {
+			return false, "Не удалось записать дату и время. Введите по формату ГГГГ-мм-дд чч:мм, например, 2019-06-12 10:00. Другие символы не допустимы. Если точное значение не известно, то укажите приблизительное. А далее можно будет оставить комментарий для исполнителя (я далее отдельно это предложу сделать)."
 		}
 		_, err = db.Exec("update tickets set "+field+"=? where customer_id=? and status=1", updValue, chatID)
 		if err != nil {
@@ -217,8 +219,8 @@ func Commands(chatID int64, user string, command string, data string) (msg tgbot
 			"Получать уведомления о новых заказах - для этого подпишитесь на канал @gruzov_v \n" +
 			"Предлагать тип ставки и цену сделки - для этого просто откликнитесь на заявку и выберите тип рассчета: фиксированный или почасовую ставку."
 	case "registration":
-		result := CheckUser(chatID)
-		if result == false {
+		step := getStep(chatID)
+		if step <= 0 {
 			_, err := db.Exec("insert into users (chat_id, name, status) values (?, ?, ?)", chatID, user, 0)
 			if err != nil {
 				log.Panic(err)
@@ -248,7 +250,7 @@ func Commands(chatID int64, user string, command string, data string) (msg tgbot
 				log.Panic(err)
 			}
 
-			message = fmt.Sprintln("Вы уже зарегистрированы как перевозчик. Для продолжения работы с заявкой ", ticketID, "нажмите кнопку.")
+			message = fmt.Sprintln("Вы уже зарегистрированы как перевозчик. Для продолжения работы с заявкой № ", ticketID, "нажмите кнопку.")
 			buttonInline = tgbotapi.NewInlineKeyboardMarkup(
 				tgbotapi.NewInlineKeyboardRow(
 					tgbotapi.NewInlineKeyboardButtonData("Предложить цену", fmt.Sprintf(`{"step":102, "data":"%d"}`, ticketID)),
@@ -340,11 +342,13 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 		message = "Адрес выгрузки"
 		UpdateTicket(chatID, step, "address_to", data)
 	case 4:
-		message = "Дата и время погрузки"
+		message = "Дата и время погрузки (например, 2019-06-12 10:00)"
 		UpdateTicket(chatID, step, "address_from", data)
 	case 5:
-		message = "Тип автомобиля (открытый, закрытый, рефрижератор и т.п.)"
-		UpdateTicket(chatID, step, "date", data)
+		_, message = UpdateTicket(chatID, step, "date", data)
+		if len(message) < 1 {
+			message = "Тип автомобиля (открытый, закрытый, рефрижератор и т.п.)"
+		}
 	case 6:
 		message = "Тип погрузки (верхняя, задняя, боковая и т.п.)"
 		UpdateTicket(chatID, step, "car_type", data)
@@ -512,9 +516,6 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 		} else {
 			message = "Вы пока не создали ниодной заявки. \n Чтобы начать, нажмите кнопку \"Создать новую\" в меню."
 		}
-
-	case 17:
-
 	}
 
 	msg = tgbotapi.NewMessage(chatID, message)
@@ -661,10 +662,14 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 				}
 
 				buttonInline = buttonInlineTmp
-			} /* else if bid.Status == 7 {
+			} else if bid.Status == 7 {
 				message = "Вы ранее отменили запрос на эту заявку. Если хотите его возобновить, то для продолжения выберите тип рассчета: "
 				buttonInline = buttonInlineTmp
-			}*/
+				_, err := db.Exec("update bid set status=0 where performer_id=? and status=7", chatID)
+				if err != nil {
+					log.Panic(err)
+				}
+			}
 		}
 
 		_, err = db.Exec("update users set status=? where chat_id=?", step+1, chatID)
@@ -866,122 +871,6 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 		} else {
 			message = "У Вас еще нет подтвержденных заявок на исполнении."
 		}
-
-	case 107:
-		message = "Укажите дату начала периода для выгрузки (например, 12.06.2019)"
-		_, err := db.Exec("update users set status=108 where chat_id=?", chatID)
-		if err != nil {
-			log.Panic(err)
-		}
-	case 108:
-		message = "Укажите дату конца периода для выгрузки (например, 30.06.2019)"
-		pathName := fmt.Sprintln("reports/", chatID)
-		os.RemoveAll(pathName)
-		os.Mkdir(pathName, 0775)
-		reportFile, err := os.Create(pathName + "/" + data)
-		if err != nil {
-			log.Panic(err)
-			os.Exit(1)
-		}
-		defer reportFile.Close()
-
-		_, err = db.Exec("update users set status=109 where chat_id=?", chatID)
-		if err != nil {
-			log.Panic(err)
-		}
-	case 109:
-		pathName := fmt.Sprintln("reports/", chatID)
-		files, err := ioutil.ReadDir(pathName)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		for _, file := range files {
-			dateStart := file.Name()
-			fileName := dateStart + "_" + data + ".csv"
-			err = os.Rename(pathName+"/"+file.Name(), pathName+"/"+fileName)
-
-			if err == nil {
-				fileOpen, err := os.OpenFile(pathName+"/"+fileName, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
-				if err != nil {
-					log.Panic(err)
-					os.Exit(1)
-				}
-				defer fileOpen.Close()
-
-				_, err = fileOpen.WriteString("№;Дата и время;Адрес погрузки;Адрес выгрузки;Тип автомобиля;Тип погрузчика;Вес (кг);Объем (м3);Макс.длина (м);Комментарий;Тип рассчетов;Прайс\n")
-				if err != nil {
-					log.Panic(err)
-				}
-
-				bids, err := db.Query("select ticket_id, type_price, price, bid_id from bid where status=4 and performer_id=?", chatID)
-				if err != nil {
-					log.Panic(err)
-				}
-				defer bids.Close()
-
-				bidsRows := make([]*Bid, 0)
-
-				for bids.Next() {
-					bid := new(Bid)
-					err = bids.Scan(&bid.TicketID, &bid.TypePrice, &bid.Price, &bid.BidID)
-					if err != nil {
-						log.Panic(err)
-					}
-					bidsRows = append(bidsRows, bid)
-				}
-
-				if len(bidsRows) > 0 {
-					for _, bid := range bidsRows {
-						tickets, err := db.Query("select customer_id, ticket_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments from tickets where ticket_id=?", bid.TicketID)
-						if err != nil {
-							log.Panic(err)
-						}
-						defer tickets.Close()
-
-						ticketsRows := make([]*Ticket, 0)
-
-						for tickets.Next() {
-							ticket := new(Ticket)
-							err = tickets.Scan(&ticket.customer_id, &ticket.ticket_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length, &ticket.comments)
-							if err != nil {
-								log.Panic(err)
-							}
-							ticketsRows = append(ticketsRows, ticket)
-						}
-
-						if len(ticketsRows) > 0 {
-							for _, ticket := range ticketsRows {
-								typePrice := "почасовой тариф (руб./час)"
-
-								if bid.TypePrice == 1 {
-									typePrice = "фиксированная стоимость"
-								}
-								item := fmt.Sprintln(
-									ticket.ticket_id,
-									";", ticket.date,
-									";", ticket.address_to,
-									";", ticket.address_from,
-									";", ticket.car_type,
-									";", ticket.shipment_type,
-									";", ticket.weight,
-									";", ticket.volume,
-									";", ticket.length,
-									";", ticket.comments,
-									";", typePrice,
-									";", bid.Price,
-								)
-
-								fileOpen.WriteString(item)
-							}
-						}
-					}
-				}
-			}
-			message = "Отчет сформирован."
-			msgFile := tgbotapi.NewDocumentUpload(chatID, pathName+"/"+fileName)
-			bot.Send(msgFile)
-		}
 	}
 
 	msg = tgbotapi.NewMessage(chatID, message)
@@ -1135,6 +1024,235 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 	return err
 }
 
+func reportHandler(step int, data string, chatID int64) (msg tgbotapi.MessageConfig) {
+	var message string
+	var button tgbotapi.ReplyKeyboardMarkup
+	var buttonInline tgbotapi.InlineKeyboardMarkup
+
+	bot := botImplement()
+
+	switch step {
+	case 202:
+		message = "Укажите дату начала периода для выгрузки (например, 2019-06-12)"
+		_, err := db.Exec("update users set status=? where chat_id=?", (step + 1), chatID)
+		if err != nil {
+			log.Panic(err)
+		}
+	case 203:
+		message = "Укажите дату конца периода для выгрузки (например, 2019-06-30)"
+		layout := "2006-01-02"
+		_, err := time.Parse(layout, data)
+		if err == nil {
+			pathName := fmt.Sprintln("reports/", chatID)
+			os.RemoveAll(pathName)
+			os.Mkdir(pathName, 0775)
+			reportFile, err := os.Create(pathName + "/" + data)
+			if err != nil {
+				log.Panic(err)
+				os.Exit(1)
+			}
+			defer reportFile.Close()
+
+			_, err = db.Exec("update users set status=? where chat_id=?", (step + 1), chatID)
+			if err != nil {
+				log.Panic(err)
+			}
+		} else {
+			message = "Укажите дату в формате ГГГГ-ММ-ДД, например, 2019-06-12"
+		}
+	case 204:
+		role := 0
+		users, err := db.Query("select role from users where chat_id=?", chatID)
+		if err != nil {
+			log.Panic(err)
+		}
+		defer users.Close()
+
+		if users.Next() != false {
+			var user User
+			err = users.Scan(&user.role)
+			if err != nil {
+				log.Panic(err)
+			}
+			role = user.role
+		}
+
+		pathName := fmt.Sprintln("reports/", chatID)
+		files, err := ioutil.ReadDir(pathName)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		for _, file := range files {
+			dateStartStr := file.Name()
+			fileName := dateStartStr + "_" + data + ".csv"
+			err = os.Rename(pathName+"/"+file.Name(), pathName+"/"+fileName)
+
+			if err == nil {
+				fileOpen, err := os.OpenFile(pathName+"/"+fileName, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+				if err != nil {
+					log.Panic(err)
+					os.Exit(1)
+				}
+				defer fileOpen.Close()
+
+				_, err = fileOpen.WriteString("№;Дата и время;Адрес погрузки;Адрес выгрузки;Тип автомобиля;Тип погрузчика;Вес (кг);Объем (м3);Макс.длина (м);Комментарий;Тип рассчетов;Прайс\n")
+				if err != nil {
+					log.Panic(err)
+				}
+				layout := "2006-01-02"
+				dateStart, _ := time.Parse(layout, dateStartStr)
+				dateEnd, _ := time.Parse(layout, data)
+
+				if role == 0 {
+					tickets, err := db.Query("select customer_id, ticket_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments from tickets where customer_id = ? and date >= ? and date <= ?", chatID, dateStart, dateEnd)
+					if err != nil {
+						log.Panic(err)
+					}
+					defer tickets.Close()
+
+					ticketsRows := make([]*Ticket, 0)
+					for tickets.Next() {
+						ticket := new(Ticket)
+						err = tickets.Scan(&ticket.customer_id, &ticket.ticket_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length, &ticket.comments)
+						if err != nil {
+							log.Panic(err)
+						}
+						ticketsRows = append(ticketsRows, ticket)
+					}
+
+					if len(ticketsRows) > 0 {
+						for _, ticket := range ticketsRows {
+							bids, err := db.Query("select ticket_id, type_price, price, bid_id from bid where status=4 and ticket_id=?", ticket.ticket_id)
+							if err != nil {
+								log.Panic(err)
+							}
+							defer bids.Close()
+
+							bidsRows := make([]*Bid, 0)
+
+							for bids.Next() {
+								bid := new(Bid)
+								err = bids.Scan(&bid.TicketID, &bid.TypePrice, &bid.Price, &bid.BidID)
+								if err != nil {
+									log.Panic(err)
+								}
+								bidsRows = append(bidsRows, bid)
+							}
+
+							if len(bidsRows) > 0 {
+								for _, bid := range bidsRows {
+									typePrice := "почасовой тариф (руб./час)"
+
+									if bid.TypePrice == 1 {
+										typePrice = "фиксированная стоимость"
+									}
+									item := fmt.Sprintln(
+										ticket.ticket_id,
+										";", ticket.date,
+										";", ticket.address_to,
+										";", ticket.address_from,
+										";", ticket.car_type,
+										";", ticket.shipment_type,
+										";", ticket.weight,
+										";", ticket.volume,
+										";", ticket.length,
+										";", ticket.comments,
+										";", typePrice,
+										";", bid.Price,
+									)
+
+									fileOpen.WriteString(item)
+								}
+							}
+						}
+					}
+
+				} else {
+					bids, err := db.Query("select ticket_id, type_price, price, bid_id from bid where status=4 and performer_id=?", chatID)
+					if err != nil {
+						log.Panic(err)
+					}
+					defer bids.Close()
+
+					bidsRows := make([]*Bid, 0)
+
+					for bids.Next() {
+						bid := new(Bid)
+						err = bids.Scan(&bid.TicketID, &bid.TypePrice, &bid.Price, &bid.BidID)
+						if err != nil {
+							log.Panic(err)
+						}
+						bidsRows = append(bidsRows, bid)
+					}
+
+					if len(bidsRows) > 0 {
+						for _, bid := range bidsRows {
+							tickets, err := db.Query("select customer_id, ticket_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments from tickets where ticket_id=? and date >= ? and date <= ?", bid.TicketID, dateStart, dateEnd)
+							if err != nil {
+								log.Panic(err)
+							}
+							defer tickets.Close()
+
+							ticketsRows := make([]*Ticket, 0)
+
+							for tickets.Next() {
+								ticket := new(Ticket)
+								err = tickets.Scan(&ticket.customer_id, &ticket.ticket_id, &ticket.date, &ticket.address_to, &ticket.address_from, &ticket.car_type, &ticket.shipment_type, &ticket.weight, &ticket.volume, &ticket.length, &ticket.comments)
+								if err != nil {
+									log.Panic(err)
+								}
+								ticketsRows = append(ticketsRows, ticket)
+							}
+
+							if len(ticketsRows) > 0 {
+								for _, ticket := range ticketsRows {
+									typePrice := "почасовой тариф (руб./час)"
+
+									if bid.TypePrice == 1 {
+										typePrice = "фиксированная стоимость"
+									}
+									item := fmt.Sprintln(
+										ticket.ticket_id,
+										";", ticket.date,
+										";", ticket.address_to,
+										";", ticket.address_from,
+										";", ticket.car_type,
+										";", ticket.shipment_type,
+										";", ticket.weight,
+										";", ticket.volume,
+										";", ticket.length,
+										";", ticket.comments,
+										";", typePrice,
+										";", bid.Price,
+									)
+
+									fileOpen.WriteString(item)
+								}
+							}
+						}
+					}
+				}
+
+			}
+			message = "Отчет сформирован."
+			msgFile := tgbotapi.NewDocumentUpload(chatID, pathName+"/"+fileName)
+			bot.Send(msgFile)
+		}
+	}
+
+	msg = tgbotapi.NewMessage(chatID, message)
+
+	if button.Keyboard != nil {
+		msg.ReplyMarkup = button
+	}
+	if buttonInline.InlineKeyboard != nil {
+		msg.ReplyMarkup = buttonInline
+	}
+
+	return msg
+}
+
 func main() {
 	GetConfig() // подключение конфига
 	ConnectDB() // подключение к БД
@@ -1178,7 +1296,7 @@ func main() {
 				case "История заявок":
 					msg = ticketHandlerClient(16, "", chatID)
 				case "Скачать отчет (заказчик)":
-					msg = ticketHandlerClient(17, "", chatID)
+					msg = reportHandler(202, "", chatID)
 				case "Изменить роль":
 					msg = changeRole(chatID)
 				case "Все новые заявки":
@@ -1186,11 +1304,13 @@ func main() {
 				case "Исполняемые мной":
 					msg = ticketHandlerExecutant(106, "0", chatID)
 				case "Скачать отчет (перевозчик)":
-					msg = ticketHandlerExecutant(107, "", chatID)
+					msg = reportHandler(202, "", chatID)
 				default:
 					step := getStep(chatID)
 					if step < 100 {
 						msg = ticketHandlerClient(step, update.Message.Text, chatID)
+					} else if step >= 202 && step < 205 {
+						msg = reportHandler(step, update.Message.Text, chatID)
 					} else {
 						msg = ticketHandlerExecutant(step, update.Message.Text, chatID)
 					}
@@ -1266,6 +1386,8 @@ func main() {
 				}
 			} else if step >= 100 && step < 200 {
 				msg = ticketHandlerExecutant(step, data, chatID)
+			} else if step >= 202 && step < 205 {
+				msg = reportHandler(step, data, chatID)
 			} else {
 				err := ticketHandlerClientAndExecutant(step, data)
 				if err != nil {
