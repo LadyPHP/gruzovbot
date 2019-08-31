@@ -1100,12 +1100,11 @@ func reportHandler(step int, data string, chatID int64) (msg tgbotapi.MessageCon
 				if err != nil {
 					log.Panic(err)
 				}
-				layout := "2006-01-02"
-				dateStart, _ := time.Parse(layout, dateStartStr)
-				dateEnd, _ := time.Parse(layout, data)
+				dateStart, _ := time.Parse("2006-01-02", dateStartStr)
+				dateEnd, _ := time.Parse("2006-01-02 15:04", data+" 23:59")
 
 				if role == 0 {
-					tickets, err := db.Query("select customer_id, ticket_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments from tickets where customer_id = ? and date >= ? and date <= ?", chatID, dateStart, dateEnd)
+					tickets, err := db.Query("select customer_id, ticket_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments from tickets where customer_id = ? and date between ? and ?", chatID, dateStart, dateEnd)
 					if err != nil {
 						log.Panic(err)
 					}
@@ -1188,7 +1187,7 @@ func reportHandler(step int, data string, chatID int64) (msg tgbotapi.MessageCon
 
 					if len(bidsRows) > 0 {
 						for _, bid := range bidsRows {
-							tickets, err := db.Query("select customer_id, ticket_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments from tickets where ticket_id=? and date >= ? and date <= ?", bid.TicketID, dateStart, dateEnd)
+							tickets, err := db.Query("select customer_id, ticket_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments from tickets where ticket_id=? and date between ? and ?", bid.TicketID, dateStart, dateEnd)
 							if err != nil {
 								log.Panic(err)
 							}
