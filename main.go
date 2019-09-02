@@ -1319,24 +1319,23 @@ func main() {
 
 				step := getStep(chatID)
 				if step == 102 {
-					tickets, err := db.Query("select role from users where  chat_id = ?", chatID) // из роли тянем ticketID, на который откликнулся перевозчик (костыль)
-					defer tickets.Close()
+					users, err := db.Query("select role from users where chat_id = ?", chatID) // из роли тянем ticketID, на который откликнулся перевозчик (костыль)
+					defer users.Close()
 
-					if tickets.Next() != false {
-						var ticket Ticket
-						err = tickets.Scan(&ticket.ticket_id)
+					if users.Next() != false {
+						var user User
+						err = users.Scan(&user.role)
 						if err != nil {
 							log.Panic(err)
 						}
-						ticketID := ticket.ticket_id
+						ticketID := user.role
 						message := fmt.Sprintln("Вы уже зарегистрированы как перевозчик. Для продолжения работы с заявкой № ", ticketID, "нажмите кнопку.")
-						buttonInline := tgbotapi.NewInlineKeyboardMarkup(
+						msg = tgbotapi.NewMessage(chatID, message)
+						msg.ReplyMarkup = tgbotapi.NewInlineKeyboardMarkup(
 							tgbotapi.NewInlineKeyboardRow(
 								tgbotapi.NewInlineKeyboardButtonData("Предложить цену", fmt.Sprintf(`{"step":102, "data":"%d"}`, ticketID)),
 							),
 						)
-						msg = tgbotapi.NewMessage(chatID, message)
-						msg.ReplyMarkup = buttonInline
 					}
 
 					// записываем номер телефона в базу и активируем перевозчика
