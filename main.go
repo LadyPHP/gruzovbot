@@ -245,7 +245,7 @@ func Commands(chatID int64, user string, command string, data string) (msg tgbot
 		// если при переходе в бота был указан id заявки, то считаем это откликом от перевозчика
 		// и выдаем ему сразу же соответствующий функционал
 		if ticketID > 0 {
-			if step >= 100 {
+			if step > 1 {
 				message = fmt.Sprintln("Вы уже зарегистрированы как перевозчик. Для продолжения работы с заявкой № ", ticketID, "нажмите кнопку.")
 				buttonInline = tgbotapi.NewInlineKeyboardMarkup(
 					tgbotapi.NewInlineKeyboardRow(
@@ -907,7 +907,7 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 			log.Panic(err)
 		}
 
-		users, err := db.Query("select name, phone from users where chat_id=?", bid.PerformerID)
+		users, err := db.Query("select name, phone, chat_id from users where chat_id=?", bid.PerformerID)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -915,15 +915,15 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 
 		if users.Next() {
 			var user User
-			err = users.Scan(&user.name, &user.phone)
+			err = users.Scan(&user.name, &user.phone, &user.chat_id)
 			if err != nil {
 				log.Panic(err)
 			}
 
 			// уведомление заказчику
-			messageClient = fmt.Sprint("Вы приняли предложение. Контакты исполнителя: " +
-				"\n Имя - " + user.name +
-				"\n Телефон - " + user.phone)
+			messageClient = "Вы приняли предложение. Контакты исполнителя я отправил выше."
+			contact := tgbotapi.NewContact(user.chat_id, user.phone, user.name)
+			bot.Send(contact)
 		}
 
 		tickets, err := db.Query("select customer_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments, chanel_message_id from tickets where ticket_id=?", bid.TicketID)
