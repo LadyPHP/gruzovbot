@@ -245,6 +245,14 @@ func Commands(chatID int64, user string, command string, data string) (msg tgbot
 		// если при переходе в бота был указан id заявки, то считаем это откликом от перевозчика
 		// и выдаем ему сразу же соответствующий функционал
 		if ticketID > 0 {
+			if step >= 100 {
+				message = fmt.Sprintln("Вы уже зарегистрированы как перевозчик. Для продолжения работы с заявкой № ", ticketID, "нажмите кнопку.")
+				buttonInline = tgbotapi.NewInlineKeyboardMarkup(
+					tgbotapi.NewInlineKeyboardRow(
+						tgbotapi.NewInlineKeyboardButtonData("Предложить цену", fmt.Sprintf(`{"step":102, "data":"%d"}`, ticketID)),
+					),
+				)
+			}
 			_, err := db.Exec("update users set role=?, status=102 where chat_id=?", ticketID, chatID)
 			if err != nil {
 				log.Panic(err)
@@ -1318,7 +1326,7 @@ func main() {
 				}
 
 				step := getStep(chatID)
-				if step == 102 {
+				if step == 102 || step == 103 {
 					users, err := db.Query("select role from users where chat_id = ?", chatID) // из роли тянем ticketID, на который откликнулся перевозчик (костыль)
 					defer users.Close()
 
