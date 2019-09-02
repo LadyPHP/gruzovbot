@@ -245,17 +245,10 @@ func Commands(chatID int64, user string, command string, data string) (msg tgbot
 		// если при переходе в бота был указан id заявки, то считаем это откликом от перевозчика
 		// и выдаем ему сразу же соответствующий функционал
 		if ticketID > 0 {
-			_, err := db.Exec("update users set role=1 where chat_id=?", chatID)
+			_, err := db.Exec("update users set role=?, status=102 where chat_id=?", ticketID, chatID)
 			if err != nil {
 				log.Panic(err)
 			}
-
-			message = fmt.Sprintln("Вы уже зарегистрированы как перевозчик. Для продолжения работы с заявкой № ", ticketID, "нажмите кнопку.")
-			buttonInline = tgbotapi.NewInlineKeyboardMarkup(
-				tgbotapi.NewInlineKeyboardRow(
-					tgbotapi.NewInlineKeyboardButtonData("Предложить цену", fmt.Sprintf(`{"step":102, "data":"%d"}`, ticketID)),
-				),
-			)
 		}
 	case "crush_application":
 		log.Panic()
@@ -1323,14 +1316,44 @@ func main() {
 				if err != nil {
 					log.Panic(err)
 				}
-				// записываем номер телефона в базу и активируем пользователя со статусом = 1
-				_, err = db.Exec("update users set phone=?, status=1 where chat_id=?", Phone, chatID)
-				if err != nil {
-					log.Panic(err)
-				}
 
-				// отправляем сообщение, чтобы выбрал роль
-				msg = changeRole(chatID)
+				step := getStep(chatID)
+				if step == 102 {
+					tickets, err := db.Query("select role from users where  chat_id = ?", chatID) // из роли тянем ticketID, на который откликнулся перевозчик (костыль)
+					defer tickets.Close()
+
+					if tickets.Next() != false {
+						var ticket Ticket
+						err = tickets.Scan(&ticket.ticket_id)
+						if err != nil {
+							log.Panic(err)
+						}
+						ticketID := ticket.ticket_id
+						message := fmt.Sprintln("Вы уже зарегистрированы как перевозчик. Для продолжения работы с заявкой № ", ticketID, "нажмите кнопку.")
+						buttonInline := tgbotapi.NewInlineKeyboardMarkup(
+							tgbotapi.NewInlineKeyboardRow(
+								tgbotapi.NewInlineKeyboardButtonData("Предложить цену", fmt.Sprintf(`{"step":102, "data":"%d"}`, ticketID)),
+							),
+						)
+						msg = tgbotapi.NewMessage(chatID, message)
+						msg.ReplyMarkup = buttonInline
+					}
+
+					// записываем номер телефона в базу и активируем перевозчика
+					_, err = db.Exec("update users set phone=? where chat_id=?", Phone, chatID)
+					if err != nil {
+						log.Panic(err)
+					}
+				} else {
+					// записываем номер телефона в базу и активируем пользователя со статусом = 1
+					_, err = db.Exec("update users set phone=?, status=1 where chat_id=?", Phone, chatID)
+					if err != nil {
+						log.Panic(err)
+					}
+
+					// отправляем сообщение, чтобы выбрал роль
+					msg = changeRole(chatID)
+				}
 			}
 
 			// Обработка остальных текстовых сообщений
