@@ -143,7 +143,8 @@ func UpdateTicket(chatID int64, step int, field string, value string) (bool, str
 		}
 	} else if field == "date" {
 		layout := "02.01.2006 15-04"
-		updValue, err := time.Parse(layout, strings.ReplaceAll(value, " ", ".2019 "))
+		nowYear := fmt.Sprint(time.Now().Year())
+		updValue, err := time.Parse(layout, strings.ReplaceAll(value, " ", "."+nowYear+" "))
 		if err != nil {
 			return false, "Не удалось записать дату и время. Введите по формату дд.мм чч-мм, например, 12.06 10-00. Другие символы не допустимы. Если точное значение не известно, то укажите приблизительное. А далее можно будет оставить комментарий для исполнителя (я далее отдельно это предложу сделать)."
 		}
@@ -168,18 +169,18 @@ func UpdateTicket(chatID int64, step int, field string, value string) (bool, str
 }
 
 func getTicketInfo(chatID int64, ticketID string, status int) (tickets *sql.Rows) {
-	tickets, err := db.Query("select ticket_id, date_format(date, '%d.%m.%Y %H-%s'), address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where status = ?", status)
+	tickets, err := db.Query("select ticket_id, date_format(date, '%d.%m.%y %H-%s'), address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where status = ?", status)
 
 	if status == 1 {
-		tickets, err = db.Query("select ticket_id, date_format(date, '%d.%m.%Y %H-%s'), address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where status = ? and customer_id=? order by ticket_id desc limit 1", status, chatID)
+		tickets, err = db.Query("select ticket_id, date_format(date, '%d.%m.%y %H-%s'), address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where status = ? and customer_id=? order by ticket_id desc limit 1", status, chatID)
 	}
 
 	if status == 0 {
-		tickets, err = db.Query("select ticket_id, status, date_format(date, '%d.%m.%Y %H-%s'), address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where customer_id=? and date != '' order by ticket_id asc", chatID)
+		tickets, err = db.Query("select ticket_id, status, date_format(date, '%d.%m.%y %H-%s'), address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where customer_id=? and date != '' order by ticket_id asc", chatID)
 	}
 
 	if ticketID != "0" {
-		tickets, err = db.Query("select ticket_id, date_format(date, '%d.%m.%Y %H-%s'), address_to, address_from, comments, car_type, shipment_type, weight, volume, length, chanel_message_id from tickets where ticket_id=?", ticketID)
+		tickets, err = db.Query("select ticket_id, date_format(date, '%d.%m.%y %H-%s'), address_to, address_from, comments, car_type, shipment_type, weight, volume, length, chanel_message_id from tickets where ticket_id=?", ticketID)
 	}
 
 	if tickets.Next() == false {
