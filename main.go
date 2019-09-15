@@ -142,10 +142,10 @@ func UpdateTicket(chatID int64, step int, field string, value string) (bool, str
 			log.Panic(err)
 		}
 	} else if field == "date" {
-		layout := "2006-01-02 15:04"
-		updValue, err := time.Parse(layout, value)
+		layout := "02.01.2006 15-04"
+		updValue, err := time.Parse(layout, strings.ReplaceAll(value, " ", ".2019 "))
 		if err != nil {
-			return false, "Не удалось записать дату и время. Введите по формату ГГГГ-мм-дд чч:мм, например, 2019-06-12 10:00. Другие символы не допустимы. Если точное значение не известно, то укажите приблизительное. А далее можно будет оставить комментарий для исполнителя (я далее отдельно это предложу сделать)."
+			return false, "Не удалось записать дату и время. Введите по формату дд.мм чч-мм, например, 12.06 10-00. Другие символы не допустимы. Если точное значение не известно, то укажите приблизительное. А далее можно будет оставить комментарий для исполнителя (я далее отдельно это предложу сделать)."
 		}
 		_, err = db.Exec("update tickets set "+field+"=? where customer_id=? and status=1", updValue, chatID)
 		if err != nil {
@@ -168,21 +168,19 @@ func UpdateTicket(chatID int64, step int, field string, value string) (bool, str
 }
 
 func getTicketInfo(chatID int64, ticketID string, status int) (tickets *sql.Rows) {
-	tickets, err := db.Query("select ticket_id, date, address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where status = ?", status)
+	tickets, err := db.Query("select ticket_id, date_format(date, '%d.%m.%Y %H-%s'), address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where status = ?", status)
 
 	if status == 1 {
-		tickets, err = db.Query("select ticket_id, date, address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where status = ? and customer_id=? order by ticket_id desc limit 1", status, chatID)
+		tickets, err = db.Query("select ticket_id, date_format(date, '%d.%m.%Y %H-%s'), address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where status = ? and customer_id=? order by ticket_id desc limit 1", status, chatID)
 	}
 
 	if status == 0 {
-		tickets, err = db.Query("select ticket_id, status, date, address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where customer_id=? and date != '' order by ticket_id asc", chatID)
+		tickets, err = db.Query("select ticket_id, status, date_format(date, '%d.%m.%Y %H-%s'), address_to, address_from, comments, car_type, shipment_type, weight, volume, length from tickets where customer_id=? and date != '' order by ticket_id asc", chatID)
 	}
 
 	if ticketID != "0" {
-		tickets, err = db.Query("select ticket_id, date, address_to, address_from, comments, car_type, shipment_type, weight, volume, length, chanel_message_id from tickets where ticket_id=?", ticketID)
+		tickets, err = db.Query("select ticket_id, date_format(date, '%d.%m.%Y %H-%s'), address_to, address_from, comments, car_type, shipment_type, weight, volume, length, chanel_message_id from tickets where ticket_id=?", ticketID)
 	}
-
-	//defer tickets.Close()
 
 	if tickets.Next() == false {
 		log.Println(err)
@@ -343,7 +341,7 @@ func ticketHandlerClient(step int, data string, chatID int64) (msg tgbotapi.Mess
 		message = "Адрес выгрузки"
 		UpdateTicket(chatID, step, "address_to", data)
 	case 4:
-		message = "Дата и время погрузки (например, 2019-06-12 10:00)"
+		message = "Дата и время погрузки (например, 12.06 10-00)"
 		UpdateTicket(chatID, step, "address_from", data)
 	case 5:
 		_, message = UpdateTicket(chatID, step, "date", data)
@@ -1034,14 +1032,14 @@ func reportHandler(step int, data string, chatID int64) (msg tgbotapi.MessageCon
 
 	switch step {
 	case 202:
-		message = "Укажите дату начала периода для выгрузки (например, 2019-06-12)"
+		message = "Укажите дату начала периода для выгрузки (например, 12.06.19)"
 		_, err := db.Exec("update users set status=? where chat_id=?", (step + 1), chatID)
 		if err != nil {
 			log.Panic(err)
 		}
 	case 203:
-		message = "Укажите дату конца периода для выгрузки (например, 2019-06-30)"
-		layout := "2006-01-02"
+		message = "Укажите дату конца периода для выгрузки (например, 30.06.19)"
+		layout := "02.01.06"
 		_, err := time.Parse(layout, data)
 		if err == nil {
 			pathName := fmt.Sprintln("reports/", chatID)
@@ -1059,7 +1057,7 @@ func reportHandler(step int, data string, chatID int64) (msg tgbotapi.MessageCon
 				log.Panic(err)
 			}
 		} else {
-			message = "Укажите дату в формате ГГГГ-ММ-ДД, например, 2019-06-12"
+			message = "Укажите дату в формате дд.мм.гггг, например, 12.06.19"
 		}
 	case 204:
 		role := 0
@@ -1101,8 +1099,8 @@ func reportHandler(step int, data string, chatID int64) (msg tgbotapi.MessageCon
 				if err != nil {
 					log.Panic(err)
 				}
-				dateStart, _ := time.Parse("2006-01-02", dateStartStr)
-				dateEnd, _ := time.Parse("2006-01-02 15:04", data+" 23:59")
+				dateStart, _ := time.Parse("02.01.06", dateStartStr)
+				dateEnd, _ := time.Parse("02.01.06 15:04", data+" 23:59")
 
 				if role == 0 {
 					tickets, err := db.Query("select customer_id, ticket_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments from tickets where customer_id = ? and date between ? and ?", chatID, dateStart, dateEnd)
