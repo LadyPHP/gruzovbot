@@ -890,6 +890,8 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 	var messageExecutor string
 	var messageExt string
 
+	userName := ""
+	userPhone := ""
 	bot := botImplement()
 
 	// выборка данных из БД для отправки уведомлений и обновления статусов
@@ -919,10 +921,8 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 				log.Panic(err)
 			}
 
-			// уведомление заказчику
-			messageClient = "Вы приняли предложение. Контакты исполнителя я отправил выше."
-			contact := tgbotapi.NewContact(user.chat_id, user.phone, user.name)
-			bot.Send(contact)
+			userName = user.name
+			userPhone = user.phone
 		}
 
 		tickets, err := db.Query("select customer_id, date, address_to, address_from, car_type, shipment_type, weight, volume, length, comments, chanel_message_id from tickets where ticket_id=?", bid.TicketID)
@@ -965,6 +965,11 @@ func ticketHandlerClientAndExecutant(step int, data string) (err error) {
 				if err != nil {
 					log.Panic(err)
 				}
+
+				// уведомление заказчику
+				messageClient = "Вы приняли предложение. Контакты исполнителя я отправил выше."
+				contact := tgbotapi.NewContact(clientChatID, userPhone, userName)
+				bot.Send(contact)
 
 				typePrice := "почасовой тариф (руб./час)"
 
