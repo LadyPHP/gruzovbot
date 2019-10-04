@@ -711,7 +711,7 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 			),
 		)
 	case 105:
-		_, err := db.Exec("update bid set status=? where performer_id=? and status=2", data, chatID)
+		_, err := db.Exec("update bid set status=? where performer_id=? and status=2 and ticket_id > 0", data, chatID)
 		if err != nil {
 			log.Panic(err)
 		}
@@ -719,7 +719,7 @@ func ticketHandlerExecutant(step int, data string, chatID int64) (msg tgbotapi.M
 		message = "Запрос отменен."
 
 		if data == "3" {
-			bids, err := db.Query("select ticket_id, type_price, price, bid_id from bid where status=? and performer_id=?", data, chatID)
+			bids, err := db.Query("select ticket_id, type_price, price, bid_id from bid where status=? and performer_id=? and ticket_id > 0", data, chatID)
 			if err != nil {
 				log.Panic(err)
 			}
